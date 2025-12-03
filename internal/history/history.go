@@ -279,7 +279,7 @@ func (m *Manager) scanRecords(rows *sql.Rows) []Record {
 // FormatRecords returns a formatted string of history records.
 func FormatRecords(records []Record) string {
 	if len(records) == 0 {
-		return "No login history found."
+		return "No login history found.\n"
 	}
 
 	var sb strings.Builder
@@ -307,7 +307,7 @@ func FormatRecords(records []Record) string {
 // FormatHostsSimple returns a simple formatted string of hosts for quick selection.
 func FormatHostsSimple(records []Record) string {
 	if len(records) == 0 {
-		return "No saved hosts found."
+		return "No saved hosts found.\n"
 	}
 
 	var sb strings.Builder
