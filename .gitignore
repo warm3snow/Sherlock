@@ -1,0 +1,35 @@
+# Binaries
+sherlock
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+dist/
+bin/
+
+# Test binary, build with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Local config with secrets
+.env
+*.local.json

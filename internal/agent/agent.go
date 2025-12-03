@@ -1,0 +1,259 @@
+// Copyright 2024 Sherlock Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package agent provides the AI agent for Sherlock that handles natural language
+// processing for SSH operations.
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/warm3snow/Sherlock/internal/ai"
+	"github.com/warm3snow/Sherlock/pkg/sshclient"
+)
+
+// Agent handles natural language processing for SSH operations.
+type Agent struct {
+	aiClient ai.ModelClient
+}
+
+// NewAgent creates a new Agent with the given AI client.
+func NewAgent(aiClient ai.ModelClient) *Agent {
+	return &Agent{
+		aiClient: aiClient,
+	}
+}
+
+const systemPromptConnection = `You are Sherlock, an AI assistant for SSH remote operations.
+Your task is to parse natural language requests to connect to remote hosts.
+
+When the user provides connection information, extract:
+1. Host: The hostname or IP address
+2. Port: The SSH port (default 22 if not specified)
+3. User: The username
+
+Respond in JSON format only:
+{
+  "host": "hostname or IP",
+  "port": 22,
+  "user": "username"
+}
+
+If you cannot determine the required information, respond with an error:
+{
+  "error": "description of what's missing"
+}
+
+Examples:
+- "connect to 192.168.1.100 as root" -> {"host": "192.168.1.100", "port": 22, "user": "root"}
+- "ssh user@example.com:2222" -> {"host": "example.com", "port": 2222, "user": "user"}
+- "login to server 10.0.0.1 port 2222 as admin" -> {"host": "10.0.0.1", "port": 2222, "user": "admin"}`
+
+const systemPromptCommand = `You are Sherlock, an AI assistant for SSH remote operations.
+Your task is to translate natural language requests into shell commands.
+
+When the user describes what they want to do, generate the appropriate shell command(s).
+
+Respond in JSON format only:
+{
+  "commands": ["command1", "command2"],
+  "description": "brief description of what these commands do",
+  "needs_confirm": false
+}
+
+Set "needs_confirm" to true for potentially dangerous operations like:
+- Deleting files or directories
+- Modifying system configuration
+- Stopping/restarting services
+- Any command that could cause data loss
+
+Examples:
+- "show me disk usage" -> {"commands": ["df -h"], "description": "Display disk space usage in human-readable format", "needs_confirm": false}
+- "list files in current directory" -> {"commands": ["ls -la"], "description": "List all files including hidden ones with details", "needs_confirm": false}
+- "remove the tmp folder" -> {"commands": ["rm -rf tmp"], "description": "Recursively remove the tmp directory and its contents", "needs_confirm": true}
+- "restart nginx service" -> {"commands": ["sudo systemctl restart nginx"], "description": "Restart the nginx service", "needs_confirm": true}`
+
+// ConnectionInfo represents parsed connection information.
+type ConnectionInfo struct {
+	Host  string `json:"host"`
+	Port  int    `json:"port"`
+	User  string `json:"user"`
+	Error string `json:"error,omitempty"`
+}
+
+// CommandInfo represents parsed command information.
+type CommandInfo struct {
+	Commands     []string `json:"commands"`
+	Description  string   `json:"description"`
+	NeedsConfirm bool     `json:"needs_confirm"`
+	Error        string   `json:"error,omitempty"`
+}
+
+// ParseConnectionRequest parses a natural language connection request.
+func (a *Agent) ParseConnectionRequest(ctx context.Context, request string) (*ConnectionInfo, error) {
+	// First try to parse common patterns directly
+	if info := parseConnectionDirect(request); info != nil {
+		return info, nil
+	}
+
+	// Fall back to AI parsing
+	messages := []*schema.Message{
+		schema.SystemMessage(systemPromptConnection),
+		schema.UserMessage(request),
+	}
+
+	response, err := a.aiClient.Generate(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	content := strings.TrimSpace(response.Content)
+	content = extractJSON(content)
+
+	var info ConnectionInfo
+	if err := json.Unmarshal([]byte(content), &info); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if info.Error != "" {
+		return nil, fmt.Errorf("connection parse error: %s", info.Error)
+	}
+
+	if info.Port == 0 {
+		info.Port = 22
+	}
+
+	return &info, nil
+}
+
+// parseConnectionDirect tries to parse common connection patterns directly.
+func parseConnectionDirect(request string) *ConnectionInfo {
+	request = strings.ToLower(request)
+
+	// Pattern: user@host:port
+	userHostPortRe := regexp.MustCompile(`([a-zA-Z0-9_-]+)@([a-zA-Z0-9.-]+):(\d+)`)
+	if matches := userHostPortRe.FindStringSubmatch(request); len(matches) == 4 {
+		port, _ := strconv.Atoi(matches[3])
+		return &ConnectionInfo{
+			User: matches[1],
+			Host: matches[2],
+			Port: port,
+		}
+	}
+
+	// Pattern: user@host
+	userHostRe := regexp.MustCompile(`([a-zA-Z0-9_-]+)@([a-zA-Z0-9.-]+)`)
+	if matches := userHostRe.FindStringSubmatch(request); len(matches) == 3 {
+		return &ConnectionInfo{
+			User: matches[1],
+			Host: matches[2],
+			Port: 22,
+		}
+	}
+
+	return nil
+}
+
+// ParseCommandRequest parses a natural language command request.
+func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*CommandInfo, error) {
+	// Check for direct command execution with $ prefix
+	if strings.HasPrefix(strings.TrimSpace(request), "$") {
+		cmd := strings.TrimPrefix(strings.TrimSpace(request), "$")
+		cmd = strings.TrimSpace(cmd)
+		return &CommandInfo{
+			Commands:     []string{cmd},
+			Description:  "Direct command execution",
+			NeedsConfirm: false,
+		}, nil
+	}
+
+	messages := []*schema.Message{
+		schema.SystemMessage(systemPromptCommand),
+		schema.UserMessage(request),
+	}
+
+	response, err := a.aiClient.Generate(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	content := strings.TrimSpace(response.Content)
+	content = extractJSON(content)
+
+	var info CommandInfo
+	if err := json.Unmarshal([]byte(content), &info); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if info.Error != "" {
+		return nil, fmt.Errorf("command parse error: %s", info.Error)
+	}
+
+	return &info, nil
+}
+
+// extractJSON extracts JSON from a response that may contain markdown code blocks.
+func extractJSON(content string) string {
+	// Try to extract JSON from markdown code blocks
+	jsonBlockRe := regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
+	if matches := jsonBlockRe.FindStringSubmatch(content); len(matches) == 2 {
+		return strings.TrimSpace(matches[1])
+	}
+
+	// Try to find JSON object directly
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		return content[start : end+1]
+	}
+
+	return content
+}
+
+// GenerateShellResponse generates a natural language response for command output.
+func (a *Agent) GenerateShellResponse(ctx context.Context, command string, output string) (string, error) {
+	systemPrompt := `You are Sherlock, an AI assistant for SSH remote operations.
+The user has executed a command. Provide a brief, helpful summary of the output.
+Keep your response concise and highlight any important information or issues.`
+
+	userPrompt := fmt.Sprintf("Command executed: %s\n\nOutput:\n%s", command, output)
+
+	messages := []*schema.Message{
+		schema.SystemMessage(systemPrompt),
+		schema.UserMessage(userPrompt),
+	}
+
+	response, err := a.aiClient.Generate(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	return strings.TrimSpace(response.Content), nil
+}
+
+// ToHostInfo converts ConnectionInfo to sshclient.HostInfo.
+func (c *ConnectionInfo) ToHostInfo() *sshclient.HostInfo {
+	return &sshclient.HostInfo{
+		Host: c.Host,
+		Port: c.Port,
+		User: c.User,
+	}
+}
