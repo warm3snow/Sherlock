@@ -259,6 +259,8 @@ func (a *App) handleInput(input string) error {
 
 		fmt.Println("Not connected to any host. Use 'connect <host>' or describe a connection.")
 		return nil
+	}
+
 	// Try to parse as connection request first
 	if isConnectionRequest(input) {
 		return a.handleConnect(input)
