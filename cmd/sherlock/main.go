@@ -28,6 +28,7 @@ import (
 	"github.com/warm3snow/Sherlock/internal/agent"
 	"github.com/warm3snow/Sherlock/internal/ai"
 	"github.com/warm3snow/Sherlock/internal/config"
+	"github.com/warm3snow/Sherlock/internal/history"
 	"github.com/warm3snow/Sherlock/pkg/sshclient"
 )
 
@@ -39,12 +40,13 @@ const (
 
 // App represents the Sherlock application.
 type App struct {
-	cfg       *config.Config
-	aiClient  ai.ModelClient
-	agent     *agent.Agent
-	sshClient *sshclient.Client
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg            *config.Config
+	aiClient       ai.ModelClient
+	agent          *agent.Agent
+	sshClient      *sshclient.Client
+	historyManager *history.Manager
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 func main() {
@@ -141,6 +143,13 @@ func main() {
 	app.aiClient = aiClient
 	app.agent = agent.NewAgent(aiClient)
 
+	// Initialize history manager
+	historyMgr, err := history.NewManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize history manager: %v\n", err)
+	}
+	app.historyManager = historyMgr
+
 	// Run the application
 	if err := app.run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -196,6 +205,15 @@ func (a *App) handleInput(input string) error {
 	case "status":
 		a.showStatus()
 		return nil
+	case "history":
+		return a.showHistory("")
+	}
+
+	// Check for history command with search query
+	if strings.HasPrefix(strings.ToLower(input), "history ") {
+		query := strings.TrimPrefix(input, "history ")
+		query = strings.TrimPrefix(query, "History ")
+		return a.showHistory(query)
 	}
 
 	// Check for special prefixes
@@ -213,6 +231,12 @@ func (a *App) handleInput(input string) error {
 		if isConnectionRequest(input) {
 			return a.handleConnect(input)
 		}
+
+		// Check if it's a history query in natural language
+		if isHistoryRequest(input) {
+			return a.handleHistoryRequest(input)
+		}
+
 		fmt.Println("Not connected to any host. Use 'connect <host>' or describe a connection.")
 		return nil
 	}
@@ -232,44 +256,92 @@ func (a *App) handleConnect(input string) error {
 
 	fmt.Printf("Connecting to %s@%s:%d...\n", connInfo.User, connInfo.Host, connInfo.Port)
 
-	// Prompt for password
-	fmt.Print("Password (leave empty to use SSH key): ")
-	reader := bufio.NewReader(os.Stdin)
-	password, _ := reader.ReadString('\n')
-	password = strings.TrimSpace(password)
-
-	// Create SSH client
-	clientCfg := &sshclient.Config{
-		HostInfo:       connInfo.ToHostInfo(),
-		Password:       password,
-		PrivateKeyPath: a.cfg.SSHKey.PrivateKeyPath,
+	// Check if this host has public key added previously
+	hasPubKey := false
+	if a.historyManager != nil {
+		hasPubKey = a.historyManager.HasPubKey(connInfo.Host, connInfo.Port, connInfo.User)
 	}
 
-	client, err := sshclient.NewClient(clientCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create SSH client: %w", err)
+	var password string
+	usedKeyAuth := false
+
+	if hasPubKey {
+		// Try to connect with SSH key first without prompting for password
+		fmt.Println("Attempting key-based authentication...")
+		clientCfg := &sshclient.Config{
+			HostInfo:       connInfo.ToHostInfo(),
+			PrivateKeyPath: a.cfg.SSHKey.PrivateKeyPath,
+		}
+
+		client, err := sshclient.NewClient(clientCfg)
+		if err == nil {
+			if err := client.Connect(a.ctx); err == nil {
+				// Key auth succeeded
+				usedKeyAuth = true
+				if a.sshClient != nil {
+					_ = a.sshClient.Close()
+				}
+				a.sshClient = client
+				fmt.Printf("Successfully connected to %s using SSH key\n", client.HostInfoString())
+
+				// Update history
+				if a.historyManager != nil {
+					_ = a.historyManager.AddRecord(connInfo.Host, connInfo.Port, connInfo.User, true)
+				}
+				return nil
+			}
+			// Key auth failed, will fall through to password prompt
+			fmt.Println("Key authentication failed, falling back to password...")
+		}
 	}
 
-	// Connect
-	if err := client.Connect(a.ctx); err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
-	}
+	if !usedKeyAuth {
+		// Prompt for password
+		fmt.Print("Password (leave empty to use SSH key): ")
+		reader := bufio.NewReader(os.Stdin)
+		password, _ = reader.ReadString('\n')
+		password = strings.TrimSpace(password)
 
-	// Close existing connection if any
-	if a.sshClient != nil {
-		_ = a.sshClient.Close()
-	}
+		// Create SSH client
+		clientCfg := &sshclient.Config{
+			HostInfo:       connInfo.ToHostInfo(),
+			Password:       password,
+			PrivateKeyPath: a.cfg.SSHKey.PrivateKeyPath,
+		}
 
-	a.sshClient = client
-	fmt.Printf("Successfully connected to %s\n", client.HostInfoString())
+		client, err := sshclient.NewClient(clientCfg)
+		if err != nil {
+			return fmt.Errorf("failed to create SSH client: %w", err)
+		}
 
-	// Optionally add public key to authorized_keys
-	if a.cfg.SSHKey.AutoAddToRemote && password != "" {
-		fmt.Println("Adding public key to remote authorized_keys...")
-		if err := client.AddPublicKeyToAuthorizedKeys(a.ctx, a.cfg.SSHKey.PublicKeyPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to add public key: %v\n", err)
-		} else {
-			fmt.Println("Public key added successfully. Future connections can use key authentication.")
+		// Connect
+		if err := client.Connect(a.ctx); err != nil {
+			return fmt.Errorf("failed to connect: %w", err)
+		}
+
+		// Close existing connection if any
+		if a.sshClient != nil {
+			_ = a.sshClient.Close()
+		}
+
+		a.sshClient = client
+		fmt.Printf("Successfully connected to %s\n", client.HostInfoString())
+
+		// Optionally add public key to authorized_keys
+		pubKeyAdded := false
+		if a.cfg.SSHKey.AutoAddToRemote && password != "" {
+			fmt.Println("Adding public key to remote authorized_keys...")
+			if err := client.AddPublicKeyToAuthorizedKeys(a.ctx, a.cfg.SSHKey.PublicKeyPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to add public key: %v\n", err)
+			} else {
+				fmt.Println("Public key added successfully. Future connections can use key authentication.")
+				pubKeyAdded = true
+			}
+		}
+
+		// Update history
+		if a.historyManager != nil {
+			_ = a.historyManager.AddRecord(connInfo.Host, connInfo.Port, connInfo.User, pubKeyAdded)
 		}
 	}
 
@@ -399,6 +471,51 @@ func isConnectionRequest(input string) bool {
 	return false
 }
 
+func isHistoryRequest(input string) bool {
+	lower := strings.ToLower(input)
+	keywords := []string{"history", "历史", "登录记录", "login history", "connection history", "show history", "list history", "查看历史", "显示历史"}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) showHistory(query string) error {
+	if a.historyManager == nil {
+		fmt.Println("History feature is not available.")
+		return nil
+	}
+
+	var records []history.Record
+	if query == "" {
+		records = a.historyManager.GetRecords()
+	} else {
+		records = a.historyManager.SearchRecords(query)
+	}
+
+	fmt.Print(history.FormatRecords(records))
+	return nil
+}
+
+func (a *App) handleHistoryRequest(input string) error {
+	// Extract any search query from the natural language input
+	lower := strings.ToLower(input)
+
+	// Try to extract a search term
+	searchPrefixes := []string{"search for ", "find ", "query ", "look for ", "搜索", "查找"}
+	var query string
+	for _, prefix := range searchPrefixes {
+		if idx := strings.Index(lower, prefix); idx != -1 {
+			query = strings.TrimSpace(input[idx+len(prefix):])
+			break
+		}
+	}
+
+	return a.showHistory(query)
+}
+
 func printBanner() {
 	fmt.Print(`
   _____ _    _ ______ _____  _      ____   _____ _  __
@@ -442,11 +559,19 @@ Available commands:
   exit, quit, q           Exit Sherlock
   status                  Show current status
   disconnect              Disconnect from current host
+  history                 Show login history
+  history <query>         Search login history
 
 Connection:
   connect <host>          Connect to a remote host
   ssh user@host:port      Connect using SSH-like syntax
   Or describe in natural language, e.g., "connect to server 192.168.1.100 as root"
+  Note: If you have logged in before with SSH key, no password will be required.
+
+History:
+  history                 Show all login history
+  history <query>         Search history by host, user, or pattern
+  Or use natural language, e.g., "show my login history"
 
 Commands (when connected):
   $<command>              Execute a command directly, e.g., $ls -la
