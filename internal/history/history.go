@@ -190,12 +190,13 @@ func (m *Manager) GetRecentRecords(n int) []Record {
 
 // SearchRecords searches for records matching the query.
 // Query can be a host, user, or user@host pattern.
+// Note: Uses LIKE with COLLATE NOCASE for case-insensitive search.
 func (m *Manager) SearchRecords(query string) []Record {
-	searchQuery := "%" + strings.ToLower(query) + "%"
+	searchQuery := "%" + query + "%"
 	sqlQuery := `
 	SELECT id, host, port, user, timestamp, has_pub_key, login_count 
 	FROM hosts 
-	WHERE LOWER(host) LIKE ? OR LOWER(user) LIKE ? OR LOWER(host || ':' || port) LIKE ?
+	WHERE host LIKE ? COLLATE NOCASE OR user LIKE ? COLLATE NOCASE OR (host || ':' || port) LIKE ? COLLATE NOCASE
 	ORDER BY timestamp DESC
 	`
 	return m.queryRecordsWithArgs(sqlQuery, searchQuery, searchQuery, searchQuery)
@@ -216,21 +217,32 @@ func (m *Manager) GetRecordByID(id int64) (*Record, error) {
 		return nil, err
 	}
 
-	r.Timestamp, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", timestamp)
-	if r.Timestamp.IsZero() {
-		r.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestamp)
-	}
-	if r.Timestamp.IsZero() {
-		r.Timestamp, _ = time.Parse(time.RFC3339, timestamp)
+	r.Timestamp = parseTimestamp(timestamp)
+	return &r, nil
+}
+
+// parseTimestamp attempts to parse a timestamp string in multiple formats.
+func parseTimestamp(timestamp string) time.Time {
+	formats := []string{
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02T15:04:05Z",
+		time.RFC3339,
+		"2006-01-02 15:04:05",
 	}
 
-	return &r, nil
+	for _, format := range formats {
+		if t, err := time.Parse(format, timestamp); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func (m *Manager) queryRecords(query string) []Record {
 	rows, err := m.db.Query(query)
 	if err != nil {
-		return nil
+		// Return empty slice for query errors - this is expected for new databases
+		return []Record{}
 	}
 	defer rows.Close()
 
@@ -240,7 +252,8 @@ func (m *Manager) queryRecords(query string) []Record {
 func (m *Manager) queryRecordsWithArgs(query string, args ...interface{}) []Record {
 	rows, err := m.db.Query(query, args...)
 	if err != nil {
-		return nil
+		// Return empty slice for query errors - this is expected for new databases
+		return []Record{}
 	}
 	defer rows.Close()
 
@@ -254,15 +267,10 @@ func (m *Manager) scanRecords(rows *sql.Rows) []Record {
 		var timestamp string
 		err := rows.Scan(&r.ID, &r.Host, &r.Port, &r.User, &timestamp, &r.HasPubKey, &r.LoginCount)
 		if err != nil {
+			// Skip rows that fail to scan - this could indicate schema changes
 			continue
 		}
-		r.Timestamp, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", timestamp)
-		if r.Timestamp.IsZero() {
-			r.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestamp)
-		}
-		if r.Timestamp.IsZero() {
-			r.Timestamp, _ = time.Parse(time.RFC3339, timestamp)
-		}
+		r.Timestamp = parseTimestamp(timestamp)
 		records = append(records, r)
 	}
 	return records
