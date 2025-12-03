@@ -210,6 +210,18 @@ type ExecuteResult struct {
 	Error error
 }
 
+// Executor is the interface for command execution on local or remote hosts.
+type Executor interface {
+	// Execute runs a command and returns the result.
+	Execute(ctx context.Context, command string) *ExecuteResult
+	// IsConnected returns true if the executor is ready.
+	IsConnected() bool
+	// Close closes the executor.
+	Close() error
+	// HostInfoString returns a string representation of the host.
+	HostInfoString() string
+}
+
 // Execute executes a command on the remote host.
 func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	result := &ExecuteResult{}

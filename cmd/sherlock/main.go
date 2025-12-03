@@ -46,6 +46,7 @@ type App struct {
 	agent          *agent.Agent
 	sshClient      *sshclient.Client
 	historyManager *history.Manager
+  localClient  *sshclient.LocalClient
 	ctx            context.Context
 	cancel         context.CancelFunc
 }
@@ -159,6 +160,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize history manager: %v\n", err)
 	}
 	app.historyManager = historyMgr
+	// Initialize local client for local command execution
+	app.localClient = sshclient.NewLocalClient()
 
 	// Run the application
 	if err := app.run(); err != nil {
@@ -178,7 +181,7 @@ func (a *App) run() error {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		prompt := "sherlock> "
+		prompt := fmt.Sprintf("sherlock[%s]> ", a.localClient.HostInfoString())
 		if a.sshClient != nil && a.sshClient.IsConnected() {
 			prompt = fmt.Sprintf("sherlock[%s]> ", a.sshClient.HostInfoString())
 		}
@@ -256,9 +259,12 @@ func (a *App) handleInput(input string) error {
 
 		fmt.Println("Not connected to any host. Use 'connect <host>' or describe a connection.")
 		return nil
+	// Try to parse as connection request first
+	if isConnectionRequest(input) {
+		return a.handleConnect(input)
 	}
 
-	// Parse as command request
+	// Parse as command request (works both locally and remotely)
 	return a.handleCommandRequest(input)
 }
 
@@ -394,10 +400,6 @@ func (a *App) handleDirectCommand(cmd string) error {
 		return nil
 	}
 
-	if a.sshClient == nil || !a.sshClient.IsConnected() {
-		return fmt.Errorf("not connected to any host")
-	}
-
 	return a.executeCommand(cmd)
 }
 
@@ -438,7 +440,14 @@ func (a *App) handleCommandRequest(input string) error {
 }
 
 func (a *App) executeCommand(cmd string) error {
-	result := a.sshClient.Execute(a.ctx, cmd)
+	var result *sshclient.ExecuteResult
+
+	// Use SSH client if connected, otherwise use local client
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		result = a.sshClient.Execute(a.ctx, cmd)
+	} else {
+		result = a.localClient.Execute(a.ctx, cmd)
+	}
 
 	if result.Stdout != "" {
 		fmt.Print(result.Stdout)
@@ -480,9 +489,9 @@ func (a *App) showStatus() {
 	fmt.Printf("LLM Model: %s\n", a.cfg.LLM.Model)
 
 	if a.sshClient != nil && a.sshClient.IsConnected() {
-		fmt.Printf("Connected to: %s\n", a.sshClient.HostInfoString())
+		fmt.Printf("Connected to: %s (remote)\n", a.sshClient.HostInfoString())
 	} else {
-		fmt.Println("SSH Status: Not connected")
+		fmt.Printf("Connected to: %s (local)\n", a.localClient.HostInfoString())
 	}
 }
 
@@ -640,10 +649,10 @@ Available commands:
   help                    Show this help message
   exit, quit, q           Exit Sherlock
   status                  Show current status
-  disconnect              Disconnect from current host
   hosts                   Show all saved hosts
   history                 Show login history
   history <query>         Search login history
+  disconnect              Disconnect from remote host (switch to local mode)
 
 Connection:
   connect <host>          Connect to a remote host
@@ -661,8 +670,10 @@ History:
   history <query>         Search history by host, user, or pattern
   Or use natural language, e.g., "show my login history"
 
-Commands (when connected):
+Commands (local or remote):
   $<command>              Execute a command directly, e.g., $ls -la
   Or describe in natural language, e.g., "show me disk usage"
+
+Note: When not connected to a remote host, commands are executed locally.
 `)
 }
