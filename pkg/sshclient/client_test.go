@@ -258,3 +258,31 @@ func TestLocalClientCdTilde(t *testing.T) {
 		}
 	}
 }
+
+func TestShellEscape(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"simple", "'simple'"},
+		{"path/to/file", "'path/to/file'"},
+		{"/absolute/path", "'/absolute/path'"},
+		{"with spaces", "'with spaces'"},
+		{"with'quote", "'with'\\''quote'"},
+		{"multiple'quotes'here", "'multiple'\\''quotes'\\''here'"},
+		{"", "''"},
+		{"$HOME", "'$HOME'"},
+		{"$(command)", "'$(command)'"},
+		{"`command`", "'`command`'"},
+		{"path;rm -rf /", "'path;rm -rf /'"},
+		{"path | cat", "'path | cat'"},
+		{"path && echo", "'path && echo'"},
+	}
+
+	for _, test := range tests {
+		result := ShellEscape(test.input)
+		if result != test.expected {
+			t.Errorf("ShellEscape(%q) = %q, expected %q", test.input, result, test.expected)
+		}
+	}
+}

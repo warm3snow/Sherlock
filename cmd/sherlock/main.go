@@ -731,7 +731,7 @@ func (a *App) completeRemoteFilePaths(searchDir, filePrefix, prefix, fullLine st
 	var completions []string
 
 	// Execute ls command on remote host to get file list
-	result := a.sshClient.Execute(a.ctx, fmt.Sprintf("ls -1a %s 2>/dev/null", searchDir))
+	result := a.sshClient.Execute(a.ctx, fmt.Sprintf("ls -1a %s 2>/dev/null", sshclient.ShellEscape(searchDir)))
 	if result.Error != nil || result.ExitCode != 0 {
 		return completions
 	}
@@ -759,7 +759,8 @@ func (a *App) completeRemoteFilePaths(searchDir, filePrefix, prefix, fullLine st
 			}
 			
 			// Check if it's a directory (execute stat on remote)
-			checkResult := a.sshClient.Execute(a.ctx, fmt.Sprintf("test -d %s && echo 'dir'", filepath.Join(searchDir, name)))
+			checkPath := filepath.Join(searchDir, name)
+			checkResult := a.sshClient.Execute(a.ctx, fmt.Sprintf("test -d %s && echo 'dir'", sshclient.ShellEscape(checkPath)))
 			if strings.TrimSpace(checkResult.Stdout) == "dir" {
 				completion += "/"
 			}

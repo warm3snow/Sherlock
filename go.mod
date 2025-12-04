@@ -5,6 +5,7 @@ go 1.24.10
 require (
 	github.com/cloudwego/eino v0.7.4
 	github.com/mattn/go-sqlite3 v1.14.32
+	github.com/peterh/liner v1.2.2
 	golang.org/x/crypto v0.45.0
 	golang.org/x/term v0.37.0
 )
@@ -27,7 +28,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
-	github.com/peterh/liner v1.2.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect

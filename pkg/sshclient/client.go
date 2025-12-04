@@ -34,6 +34,15 @@ import (
 	"golang.org/x/term"
 )
 
+// ShellEscape escapes a string for safe use in shell commands.
+// It wraps the string in single quotes and escapes any single quotes within.
+func ShellEscape(s string) string {
+	// Single quotes are the safest way to escape in shell
+	// Replace single quotes with '\'' (end quote, escaped quote, start quote)
+	escaped := strings.ReplaceAll(s, "'", "'\\''")
+	return "'" + escaped + "'"
+}
+
 // AuthMethod represents the SSH authentication method.
 type AuthMethod string
 
@@ -372,7 +381,7 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	fullCommand := command
 	if c.cwd != "" && !isCdCommand {
 		// For regular commands, cd to the tracked directory first
-		fullCommand = fmt.Sprintf("cd %s && %s", c.cwd, command)
+		fullCommand = fmt.Sprintf("cd %s && %s", ShellEscape(c.cwd), command)
 	} else if isCdCommand {
 		// For cd commands, we need to track the new directory
 		// First, resolve the target directory on the remote host
@@ -384,9 +393,9 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 		var resolveCmd string
 		if c.cwd != "" && target != "" && !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~") {
 			// Relative path - resolve from current directory
-			resolveCmd = fmt.Sprintf("cd %s && cd %s && pwd", c.cwd, target)
+			resolveCmd = fmt.Sprintf("cd %s && cd %s && pwd", ShellEscape(c.cwd), ShellEscape(target))
 		} else {
-			resolveCmd = fmt.Sprintf("cd %s && pwd", target)
+			resolveCmd = fmt.Sprintf("cd %s && pwd", ShellEscape(target))
 		}
 		
 		err = session.Run(resolveCmd)
@@ -508,7 +517,7 @@ func (c *Client) ExecuteInteractive(_ context.Context, command string) error {
 	// Prepend cd to the command if we have a tracked working directory
 	fullCommand := command
 	if c.cwd != "" {
-		fullCommand = fmt.Sprintf("cd %s && %s", c.cwd, command)
+		fullCommand = fmt.Sprintf("cd %s && %s", ShellEscape(c.cwd), command)
 	}
 
 	// Start the command
