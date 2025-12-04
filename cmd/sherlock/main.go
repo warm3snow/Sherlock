@@ -48,9 +48,10 @@ type App struct {
 	agent          *agent.Agent
 	sshClient      *sshclient.Client
 	historyManager *history.Manager
-  localClient  *sshclient.LocalClient
+	localClient    *sshclient.LocalClient
 	ctx            context.Context
 	cancel         context.CancelFunc
+	sigChan        chan os.Signal
 }
 
 func main() {
@@ -64,13 +65,13 @@ func main() {
 	}
 
 	var (
-		configPath    string
-		showVersion   bool
-		showHelp      bool
-		providerFlag  string
-		modelFlag     string
-		baseURLFlag   string
-		apiKeyFlag    string
+		configPath   string
+		showVersion  bool
+		showHelp     bool
+		providerFlag string
+		modelFlag    string
+		baseURLFlag  string
+		apiKeyFlag   string
 	)
 
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
@@ -137,20 +138,32 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	app := &App{
-		cfg:    cfg,
-		ctx:    ctx,
-		cancel: cancel,
-	}
-
-	// Handle signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	app := &App{
+		cfg:     cfg,
+		ctx:     ctx,
+		cancel:  cancel,
+		sigChan: sigChan,
+	}
+
+	// Handle signals:
+	// - First Ctrl+C when connected to remote host: disconnect from remote
+	// - First Ctrl+C when not connected OR second Ctrl+C: exit sherlock
 	go func() {
-		<-sigChan
-		fmt.Println("\nReceived interrupt signal, cleaning up...")
-		app.cleanup()
-		os.Exit(0)
+		for {
+			<-sigChan
+			if app.sshClient != nil && app.sshClient.IsConnected() {
+				fmt.Println("\nDisconnecting from remote host... (Press Ctrl+C again to exit)")
+				_ = app.sshClient.Close()
+				app.sshClient = nil
+			} else {
+				fmt.Println("\nReceived interrupt signal, cleaning up...")
+				app.cleanup()
+				os.Exit(0)
+			}
+		}
 	}()
 
 	// Initialize AI client
