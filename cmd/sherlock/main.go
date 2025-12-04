@@ -175,6 +175,11 @@ func main() {
 	app.aiClient = aiClient
 	app.agent = agent.NewAgent(aiClient)
 
+	// Set custom shell commands from config whitelist
+	if len(cfg.ShellCommands.Whitelist) > 0 {
+		app.agent.SetCustomShellCommands(cfg.ShellCommands.Whitelist)
+	}
+
 	// Initialize history manager
 	historyMgr, err := history.NewManager()
 	if err != nil {

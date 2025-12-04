@@ -76,11 +76,26 @@ You typically don't need to configure SSH keys manually. If you want to override
     "private_key_path": "~/.ssh/id_rsa",
     "public_key_path": "~/.ssh/id_rsa.pub",
     "auto_add_to_remote": true
+  },
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd"]
   }
 }
 ```
 
 **Note:** The `ssh_key` section is optional. If omitted, Sherlock will auto-detect SSH keys.
+
+#### Shell Commands Whitelist
+
+You can add custom shell commands to the whitelist. These commands will be executed directly without LLM translation, improving execution efficiency.
+
+```json
+{
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd", "custom-script"]
+  }
+}
+```
 
 #### LLM Providers
 
