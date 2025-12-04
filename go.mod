@@ -1,4 +1,4 @@
-module github.com/warm3snow/Sherlock
+module github.com/warm3snow/sherlock
 
 go 1.24.10
 

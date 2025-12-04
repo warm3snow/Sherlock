@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/warm3snow/Sherlock/internal/config"
+	"github.com/warm3snow/sherlock/internal/config"
 )
 
 func TestGetTheme(t *testing.T) {

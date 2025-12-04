@@ -27,8 +27,8 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/warm3snow/Sherlock/internal/ai"
-	"github.com/warm3snow/Sherlock/pkg/sshclient"
+	"github.com/warm3snow/sherlock/internal/ai"
+	"github.com/warm3snow/sherlock/pkg/sshclient"
 )
 
 // Agent handles natural language processing for SSH operations.

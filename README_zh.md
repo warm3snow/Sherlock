@@ -50,7 +50,7 @@ Sherlock 是一个基于 AI 的远程运维工具，底层基于 SSH。它可以
 
 ```bash
 # 克隆仓库
-git clone https://github.com/warm3snow/Sherlock.git
+git clone https://github.com/warm3snow/sherlock.git
 cd Sherlock
 
 # 构建

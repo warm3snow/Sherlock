@@ -50,7 +50,7 @@ Sherlock is an AI-based remote operations tool built on SSH. It enables you to i
 
 ```bash
 # Clone the repository
-git clone https://github.com/warm3snow/Sherlock.git
+git clone https://github.com/warm3snow/sherlock.git
 cd Sherlock
 
 # Build

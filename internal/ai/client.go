@@ -164,9 +164,9 @@ type ConnectionIntent struct {
 
 // CommandIntent represents a parsed command intent.
 type CommandIntent struct {
-	Commands    []string `json:"commands"`
-	Description string   `json:"description"`
-	NeedsConfirm bool    `json:"needs_confirm"`
+	Commands     []string `json:"commands"`
+	Description  string   `json:"description"`
+	NeedsConfirm bool     `json:"needs_confirm"`
 }
 
 // Verify interface compliance.

@@ -37,13 +37,13 @@ const (
 
 // OpenAIConfig stores configuration for OpenAI client.
 type OpenAIConfig struct {
-	APIKey      string         `json:"api_key"`
-	BaseURL     string         `json:"base_url"`
-	Model       string         `json:"model"`
-	Temperature *float32       `json:"temperature,omitempty"`
-	MaxTokens   *int           `json:"max_tokens,omitempty"`
-	Timeout     time.Duration  `json:"timeout"`
-	HTTPClient  *http.Client   `json:"-"`
+	APIKey      string        `json:"api_key"`
+	BaseURL     string        `json:"base_url"`
+	Model       string        `json:"model"`
+	Temperature *float32      `json:"temperature,omitempty"`
+	MaxTokens   *int          `json:"max_tokens,omitempty"`
+	Timeout     time.Duration `json:"timeout"`
+	HTTPClient  *http.Client  `json:"-"`
 }
 
 // OpenAIChatModel implements model.ChatModel for OpenAI.
@@ -79,11 +79,11 @@ func NewOpenAIChatModel(_ context.Context, config *OpenAIConfig) (*OpenAIChatMod
 
 // openAIChatRequest represents a request to OpenAI's chat API.
 type openAIChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []openAIMessage  `json:"messages"`
-	Temperature *float32         `json:"temperature,omitempty"`
-	MaxTokens   *int             `json:"max_tokens,omitempty"`
-	Stream      bool             `json:"stream"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	Temperature *float32        `json:"temperature,omitempty"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Stream      bool            `json:"stream"`
 }
 
 // openAIMessage represents a message in OpenAI format.
