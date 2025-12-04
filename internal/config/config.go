@@ -23,6 +23,44 @@ import (
 	"path/filepath"
 )
 
+// SSHKeyPair represents a pair of SSH private and public key paths.
+type SSHKeyPair struct {
+	PrivateKeyPath string
+	PublicKeyPath  string
+}
+
+// DetectSSHKeys auto-detects SSH keys from the ~/.ssh/ directory.
+// It prioritizes id_ed25519 over id_rsa.
+// Returns the detected key pair and a boolean indicating if keys were found.
+func DetectSSHKeys() (*SSHKeyPair, bool) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, false
+	}
+
+	sshDir := filepath.Join(homeDir, ".ssh")
+
+	// Prioritized list of key types to try
+	keyTypes := []string{"id_ed25519", "id_rsa"}
+
+	for _, keyType := range keyTypes {
+		privateKeyPath := filepath.Join(sshDir, keyType)
+		publicKeyPath := filepath.Join(sshDir, keyType+".pub")
+
+		// Check if both private and public keys exist
+		if _, err := os.Stat(privateKeyPath); err == nil {
+			if _, err := os.Stat(publicKeyPath); err == nil {
+				return &SSHKeyPair{
+					PrivateKeyPath: privateKeyPath,
+					PublicKeyPath:  publicKeyPath,
+				}, true
+			}
+		}
+	}
+
+	return nil, false
+}
+
 // LLMProviderType defines the type of LLM provider.
 type LLMProviderType string
 
@@ -69,8 +107,7 @@ type Config struct {
 
 // DefaultConfig returns a default configuration.
 func DefaultConfig() *Config {
-	homeDir, _ := os.UserHomeDir()
-	return &Config{
+	cfg := &Config{
 		LLM: LLMConfig{
 			Provider:    ProviderOllama,
 			BaseURL:     "http://localhost:11434",
@@ -78,11 +115,17 @@ func DefaultConfig() *Config {
 			Temperature: 0.7,
 		},
 		SSHKey: SSHKeyConfig{
-			PrivateKeyPath:  filepath.Join(homeDir, ".ssh", "id_rsa"),
-			PublicKeyPath:   filepath.Join(homeDir, ".ssh", "id_rsa.pub"),
 			AutoAddToRemote: true,
 		},
 	}
+
+	// Auto-detect SSH keys from ~/.ssh/ directory
+	if keyPair, found := DetectSSHKeys(); found {
+		cfg.SSHKey.PrivateKeyPath = keyPair.PrivateKeyPath
+		cfg.SSHKey.PublicKeyPath = keyPair.PublicKeyPath
+	}
+
+	return cfg
 }
 
 // Validate validates the configuration.
@@ -121,6 +164,14 @@ func LoadConfig(path string) (*Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Auto-detect SSH keys if not specified in config file
+	if cfg.SSHKey.PrivateKeyPath == "" || cfg.SSHKey.PublicKeyPath == "" {
+		if keyPair, found := DetectSSHKeys(); found {
+			cfg.SSHKey.PrivateKeyPath = keyPair.PrivateKeyPath
+			cfg.SSHKey.PublicKeyPath = keyPair.PublicKeyPath
+		}
 	}
 
 	return &cfg, nil

@@ -34,6 +34,12 @@ go install ./cmd/sherlock
 
 Sherlock uses a JSON configuration file. The default location is `~/.config/sherlock/config.json`.
 
+#### SSH Key Auto-Detection
+
+Sherlock automatically detects SSH keys from the `~/.ssh/` directory. It prioritizes `id_ed25519` over `id_rsa`. If neither key is found, a warning message is displayed and password authentication will be used.
+
+You typically don't need to configure SSH keys manually. If you want to override the auto-detection, you can specify the paths in the configuration file:
+
 ```json
 {
   "llm": {
@@ -49,6 +55,8 @@ Sherlock uses a JSON configuration file. The default location is `~/.config/sher
   }
 }
 ```
+
+**Note:** The `ssh_key` section is optional. If omitted, Sherlock will auto-detect SSH keys.
 
 #### LLM Providers
 
@@ -236,6 +244,12 @@ go install ./cmd/sherlock
 
 Sherlock 使用 JSON 配置文件，默认位置为 `~/.config/sherlock/config.json`。
 
+#### SSH 密钥自动检测
+
+Sherlock 会自动从 `~/.ssh/` 目录检测 SSH 密钥。优先使用 `id_ed25519`，如果没有则使用 `id_rsa`。如果两者都没有找到，会显示警告信息并使用密码登录。
+
+通常不需要手动配置 SSH 密钥。如果需要覆盖自动检测，可以在配置文件中指定路径：
+
 ```json
 {
   "llm": {
@@ -251,6 +265,8 @@ Sherlock 使用 JSON 配置文件，默认位置为 `~/.config/sherlock/config.j
   }
 }
 ```
+
+**注意：** `ssh_key` 配置项是可选的。如果不配置，Sherlock 会自动检测 SSH 密钥。
 
 #### LLM 提供商配置
 
