@@ -42,13 +42,13 @@ type OllamaOptions struct {
 
 // OllamaConfig stores configuration for Ollama client.
 type OllamaConfig struct {
-	BaseURL    string         `json:"base_url"`
-	Timeout    time.Duration  `json:"timeout"`
-	Model      string         `json:"model"`
+	BaseURL    string          `json:"base_url"`
+	Timeout    time.Duration   `json:"timeout"`
+	Model      string          `json:"model"`
 	Format     json.RawMessage `json:"format,omitempty"`
-	KeepAlive  *time.Duration `json:"keep_alive,omitempty"`
-	Options    *OllamaOptions `json:"options,omitempty"`
-	HTTPClient *http.Client   `json:"-"`
+	KeepAlive  *time.Duration  `json:"keep_alive,omitempty"`
+	Options    *OllamaOptions  `json:"options,omitempty"`
+	HTTPClient *http.Client    `json:"-"`
 }
 
 // OllamaChatModel implements model.ChatModel for Ollama.
@@ -87,12 +87,12 @@ func NewOllamaChatModel(_ context.Context, config *OllamaConfig) (*OllamaChatMod
 
 // ollamaChatRequest represents a request to Ollama's chat API.
 type ollamaChatRequest struct {
-	Model     string                 `json:"model"`
-	Messages  []ollamaMessage        `json:"messages"`
-	Stream    bool                   `json:"stream"`
-	Format    json.RawMessage        `json:"format,omitempty"`
-	Options   map[string]any         `json:"options,omitempty"`
-	KeepAlive string                 `json:"keep_alive,omitempty"`
+	Model     string          `json:"model"`
+	Messages  []ollamaMessage `json:"messages"`
+	Stream    bool            `json:"stream"`
+	Format    json.RawMessage `json:"format,omitempty"`
+	Options   map[string]any  `json:"options,omitempty"`
+	KeepAlive string          `json:"keep_alive,omitempty"`
 }
 
 // ollamaMessage represents a message in Ollama format.
@@ -103,15 +103,15 @@ type ollamaMessage struct {
 
 // ollamaChatResponse represents a response from Ollama's chat API.
 type ollamaChatResponse struct {
-	Model     string        `json:"model"`
-	CreatedAt string        `json:"created_at"`
-	Message   ollamaMessage `json:"message"`
-	Done      bool          `json:"done"`
-	DoneReason string       `json:"done_reason,omitempty"`
-	TotalDuration int64     `json:"total_duration,omitempty"`
-	LoadDuration  int64     `json:"load_duration,omitempty"`
-	PromptEvalCount int     `json:"prompt_eval_count,omitempty"`
-	EvalCount   int         `json:"eval_count,omitempty"`
+	Model           string        `json:"model"`
+	CreatedAt       string        `json:"created_at"`
+	Message         ollamaMessage `json:"message"`
+	Done            bool          `json:"done"`
+	DoneReason      string        `json:"done_reason,omitempty"`
+	TotalDuration   int64         `json:"total_duration,omitempty"`
+	LoadDuration    int64         `json:"load_duration,omitempty"`
+	PromptEvalCount int           `json:"prompt_eval_count,omitempty"`
+	EvalCount       int           `json:"eval_count,omitempty"`
 }
 
 // Generate generates a response from the model.

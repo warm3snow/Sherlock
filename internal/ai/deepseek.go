@@ -37,13 +37,13 @@ const (
 
 // DeepSeekConfig stores configuration for DeepSeek client.
 type DeepSeekConfig struct {
-	APIKey      string         `json:"api_key"`
-	BaseURL     string         `json:"base_url"`
-	Model       string         `json:"model"`
-	Temperature *float32       `json:"temperature,omitempty"`
-	MaxTokens   *int           `json:"max_tokens,omitempty"`
-	Timeout     time.Duration  `json:"timeout"`
-	HTTPClient  *http.Client   `json:"-"`
+	APIKey      string        `json:"api_key"`
+	BaseURL     string        `json:"base_url"`
+	Model       string        `json:"model"`
+	Temperature *float32      `json:"temperature,omitempty"`
+	MaxTokens   *int          `json:"max_tokens,omitempty"`
+	Timeout     time.Duration `json:"timeout"`
+	HTTPClient  *http.Client  `json:"-"`
 }
 
 // DeepSeekChatModel implements model.ChatModel for DeepSeek.
@@ -80,11 +80,11 @@ func NewDeepSeekChatModel(_ context.Context, config *DeepSeekConfig) (*DeepSeekC
 // deepSeekChatRequest represents a request to DeepSeek's chat API.
 // DeepSeek uses OpenAI-compatible API format.
 type deepSeekChatRequest struct {
-	Model       string              `json:"model"`
-	Messages    []deepSeekMessage   `json:"messages"`
-	Temperature *float32            `json:"temperature,omitempty"`
-	MaxTokens   *int                `json:"max_tokens,omitempty"`
-	Stream      bool                `json:"stream"`
+	Model       string            `json:"model"`
+	Messages    []deepSeekMessage `json:"messages"`
+	Temperature *float32          `json:"temperature,omitempty"`
+	MaxTokens   *int              `json:"max_tokens,omitempty"`
+	Stream      bool              `json:"stream"`
 }
 
 // deepSeekMessage represents a message in DeepSeek format.
