@@ -370,7 +370,9 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	if termType == "" || !isValidTermType(termType) {
 		termType = "xterm-256color"
 	}
-	command = fmt.Sprintf("export TERM=%s; %s", termType, command)
+	// Use single quotes for additional shell safety, even though isValidTermType
+	// already ensures the value contains only safe characters.
+	command = fmt.Sprintf("export TERM='%s'; %s", termType, command)
 
 	err = session.Run(command)
 	result.Stdout = stdout.String()
