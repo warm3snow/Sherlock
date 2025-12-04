@@ -20,9 +20,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
-	"syscall"
 
 	"golang.org/x/term"
 )
@@ -98,11 +96,6 @@ func (c *LocalClient) ExecuteInteractive(ctx context.Context, command string) er
 		}
 		defer term.Restore(fd, oldState)
 	}
-
-	// Handle signals to restore terminal state
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
 
 	// Run the command
 	err = cmd.Run()
