@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // AuthMethod represents the SSH authentication method.
@@ -85,6 +86,7 @@ type Client struct {
 	hostInfo    *HostInfo
 	sshConfig   *ssh.ClientConfig
 	isConnected bool
+	agentConn   net.Conn // Connection to SSH agent, if used
 }
 
 // Config holds the configuration for creating a new SSH client.
@@ -111,10 +113,29 @@ func NewClient(cfg *Config) (*Client, error) {
 	}
 
 	var authMethods []ssh.AuthMethod
+	var agentConn net.Conn
 
-	// Try public key authentication first
+	// Try SSH agent authentication first (highest priority)
+	agentAuth, conn := sshAgentAuth()
+	if agentAuth != nil {
+		authMethods = append(authMethods, agentAuth)
+		agentConn = conn
+	}
+
+	// Try public key authentication with specified key path
 	if cfg.PrivateKeyPath != "" {
 		keyAuth, err := publicKeyAuth(cfg.PrivateKeyPath, cfg.PrivateKeyPassphrase)
+		if err == nil {
+			authMethods = append(authMethods, keyAuth)
+		}
+	}
+
+	// Try default SSH key paths (always try to add more auth methods)
+	for _, keyPath := range GetDefaultKeyPaths() {
+		if keyPath == cfg.PrivateKeyPath {
+			continue // Skip if already tried
+		}
+		keyAuth, err := publicKeyAuth(keyPath, "")
 		if err == nil {
 			authMethods = append(authMethods, keyAuth)
 		}
@@ -126,6 +147,10 @@ func NewClient(cfg *Config) (*Client, error) {
 	}
 
 	if len(authMethods) == 0 {
+		// Close agent connection if we're not going to use it
+		if agentConn != nil {
+			agentConn.Close()
+		}
 		return nil, errors.New("at least one authentication method is required")
 	}
 
@@ -144,7 +169,25 @@ func NewClient(cfg *Config) (*Client, error) {
 	return &Client{
 		hostInfo:  cfg.HostInfo,
 		sshConfig: sshConfig,
+		agentConn: agentConn,
 	}, nil
+}
+
+// sshAgentAuth creates an ssh.AuthMethod from the SSH agent.
+// It returns the auth method and the connection to the agent (which should be closed when done).
+func sshAgentAuth() (ssh.AuthMethod, net.Conn) {
+	socket := os.Getenv("SSH_AUTH_SOCK")
+	if socket == "" {
+		return nil, nil
+	}
+
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return nil, nil
+	}
+
+	agentClient := agent.NewClient(conn)
+	return ssh.PublicKeysCallback(agentClient.Signers), conn
 }
 
 // publicKeyAuth creates an ssh.AuthMethod from a private key file.
@@ -186,6 +229,12 @@ func (c *Client) Connect(_ context.Context) error {
 
 // Close closes the SSH connection.
 func (c *Client) Close() error {
+	// Close agent connection if present
+	if c.agentConn != nil {
+		c.agentConn.Close()
+		c.agentConn = nil
+	}
+
 	if !c.isConnected || c.client == nil {
 		return nil
 	}
@@ -307,10 +356,22 @@ func (c *Client) HostInfoString() string {
 	return fmt.Sprintf("%s@%s:%d", c.hostInfo.User, c.hostInfo.Host, c.hostInfo.Port)
 }
 
-// GetSSHKeyPaths returns the default SSH key paths.
+// GetSSHKeyPaths returns the default SSH key paths (for backward compatibility).
 func GetSSHKeyPaths() (privateKeyPath, publicKeyPath string) {
 	homeDir, _ := os.UserHomeDir()
 	privateKeyPath = filepath.Join(homeDir, ".ssh", "id_rsa")
 	publicKeyPath = filepath.Join(homeDir, ".ssh", "id_rsa.pub")
 	return
+}
+
+// GetDefaultKeyPaths returns all default SSH private key paths to try.
+func GetDefaultKeyPaths() []string {
+	homeDir, _ := os.UserHomeDir()
+	sshDir := filepath.Join(homeDir, ".ssh")
+	return []string{
+		filepath.Join(sshDir, "id_ed25519"),
+		filepath.Join(sshDir, "id_ecdsa"),
+		filepath.Join(sshDir, "id_rsa"),
+		filepath.Join(sshDir, "id_dsa"),
+	}
 }
