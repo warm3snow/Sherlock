@@ -281,14 +281,6 @@ func isDangerousCommand(input string) bool {
 		}
 	}
 
-	// Check for dangerous patterns in the full command
-	lowerInput := strings.ToLower(input)
-	
-	// rm with -r/-rf flags is especially dangerous
-	if cmdName == "rm" && (strings.Contains(lowerInput, " -r") || strings.Contains(lowerInput, " -f")) {
-		return true
-	}
-
 	return false
 }
 
