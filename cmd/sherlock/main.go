@@ -46,10 +46,12 @@ const (
 	description = "AI-powered SSH remote operations tool"
 )
 
-// ansiRegex matches ANSI escape sequences
+// ansiRegex matches ANSI color/style escape sequences (e.g., \033[31m, \033[1;32m).
+// This handles the common color codes used in terminal prompts.
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-// stripANSI removes ANSI escape codes from a string
+// stripANSI removes ANSI escape codes from a string.
+// Used when the liner library rejects prompts with control characters.
 func stripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
 }
