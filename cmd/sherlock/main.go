@@ -20,13 +20,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/peterh/liner"
 
 	"github.com/warm3snow/Sherlock/internal/agent"
 	"github.com/warm3snow/Sherlock/internal/ai"
@@ -54,6 +58,7 @@ type App struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	sigChan        chan os.Signal
+	liner          *liner.State
 }
 
 func main() {
@@ -207,7 +212,15 @@ func (a *App) run() error {
 	fmt.Println(a.theme.FormatInfo("Type 'help' for available commands or describe what you want to do."))
 	fmt.Println()
 
-	reader := bufio.NewReader(os.Stdin)
+	// Initialize liner for readline-like functionality
+	a.liner = liner.NewLiner()
+	defer a.liner.Close()
+
+	// Set up tab completion
+	a.liner.SetCompleter(a.completer)
+
+	// Enable multiline mode for better UX
+	a.liner.SetCtrlCAborts(true)
 
 	for {
 		var hostStr string
@@ -218,9 +231,12 @@ func (a *App) run() error {
 		}
 		prompt := a.theme.FormatPrompt("sherlock[", hostStr, "]> ")
 
-		fmt.Print(prompt)
-		input, err := reader.ReadString('\n')
+		input, err := a.liner.Prompt(prompt)
 		if err != nil {
+			if err == liner.ErrPromptAborted || err == io.EOF {
+				fmt.Println("\nGoodbye!")
+				return nil
+			}
 			return fmt.Errorf("failed to read input: %w", err)
 		}
 
@@ -228,6 +244,9 @@ func (a *App) run() error {
 		if input == "" {
 			continue
 		}
+
+		// Add to liner history
+		a.liner.AppendHistory(input)
 
 		if err := a.handleInput(input); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", a.theme.FormatError("Error: "+err.Error()))
@@ -548,6 +567,209 @@ func (a *App) cleanup() {
 		_ = a.historyManager.Close()
 	}
 	a.cancel()
+}
+
+// completer provides tab completion for commands and file paths.
+func (a *App) completer(line string) []string {
+	// Get current working directory
+	var cwd string
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		cwd = a.sshClient.GetCwd()
+	} else {
+		cwd = a.localClient.GetCwd()
+	}
+
+	// Split the line to find the last token
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		// Complete shell commands when line is empty
+		return a.completeCommands("")
+	}
+
+	// Check if we're completing the first word (command) or arguments
+	lastPart := parts[len(parts)-1]
+	
+	// If the line ends with a space, we're starting a new token (likely a path)
+	if strings.HasSuffix(line, " ") {
+		// Complete file paths from current directory
+		return a.completeFilePaths(cwd, "", line)
+	}
+
+	// If there's only one part, complete as command
+	if len(parts) == 1 {
+		return a.completeCommands(lastPart)
+	}
+
+	// Otherwise, complete as file path
+	return a.completeFilePaths(cwd, lastPart, line)
+}
+
+// completeCommands returns completions for shell commands.
+func (a *App) completeCommands(prefix string) []string {
+	// Built-in commands
+	builtinCommands := []string{
+		"help", "exit", "quit", "disconnect", "status", "history", "hosts", "connect",
+	}
+
+	// Common shell commands
+	shellCommands := []string{
+		"ls", "cd", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
+		"touch", "cat", "head", "tail", "less", "more", "find", "grep",
+		"ps", "top", "htop", "df", "du", "free", "uname", "hostname",
+		"ping", "curl", "wget", "ssh", "scp", "rsync",
+		"git", "docker", "kubectl", "systemctl", "service",
+		"vim", "nano", "vi", "echo", "export", "env", "clear",
+	}
+
+	allCommands := append(builtinCommands, shellCommands...)
+	var completions []string
+	
+	prefix = strings.ToLower(prefix)
+	for _, cmd := range allCommands {
+		if strings.HasPrefix(cmd, prefix) {
+			completions = append(completions, cmd)
+		}
+	}
+
+	return completions
+}
+
+// completeFilePaths returns completions for file paths.
+func (a *App) completeFilePaths(cwd, prefix, fullLine string) []string {
+	var completions []string
+
+	// Determine the directory to search and the file prefix
+	searchDir := cwd
+	filePrefix := prefix
+
+	// Handle absolute paths
+	if strings.HasPrefix(prefix, "/") {
+		searchDir = filepath.Dir(prefix)
+		filePrefix = filepath.Base(prefix)
+		if prefix == "/" || strings.HasSuffix(prefix, "/") {
+			searchDir = prefix
+			if strings.HasSuffix(searchDir, "/") && searchDir != "/" {
+				searchDir = searchDir[:len(searchDir)-1]
+			}
+			filePrefix = ""
+		}
+	} else if strings.HasPrefix(prefix, "~/") {
+		// Handle home directory
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			expandedPrefix := filepath.Join(homeDir, prefix[2:])
+			searchDir = filepath.Dir(expandedPrefix)
+			filePrefix = filepath.Base(expandedPrefix)
+			if strings.HasSuffix(prefix, "/") {
+				searchDir = expandedPrefix
+				if strings.HasSuffix(searchDir, "/") {
+					searchDir = searchDir[:len(searchDir)-1]
+				}
+				filePrefix = ""
+			}
+		}
+	} else if strings.Contains(prefix, "/") {
+		// Handle relative path with directories
+		searchDir = filepath.Join(cwd, filepath.Dir(prefix))
+		filePrefix = filepath.Base(prefix)
+		if strings.HasSuffix(prefix, "/") {
+			searchDir = filepath.Join(cwd, prefix)
+			if strings.HasSuffix(searchDir, "/") {
+				searchDir = searchDir[:len(searchDir)-1]
+			}
+			filePrefix = ""
+		}
+	}
+
+	// If connected to remote, use remote file listing
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		return a.completeRemoteFilePaths(searchDir, filePrefix, prefix, fullLine)
+	}
+
+	// Local file completion
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		return completions
+	}
+
+	// Build the prefix for the full line (everything before the file we're completing)
+	linePrefix := fullLine
+	if len(prefix) > 0 {
+		linePrefix = strings.TrimSuffix(fullLine, prefix)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, filePrefix) {
+			var completion string
+			if strings.HasPrefix(prefix, "/") {
+				completion = filepath.Join(searchDir, name)
+			} else if strings.HasPrefix(prefix, "~/") {
+				homeDir, _ := os.UserHomeDir()
+				relPath, _ := filepath.Rel(homeDir, filepath.Join(searchDir, name))
+				completion = "~/" + relPath
+			} else if strings.Contains(prefix, "/") {
+				completion = filepath.Join(filepath.Dir(prefix), name)
+			} else {
+				completion = name
+			}
+			
+			// Add trailing slash for directories
+			if entry.IsDir() {
+				completion += "/"
+			}
+			
+			completions = append(completions, linePrefix+completion)
+		}
+	}
+
+	return completions
+}
+
+// completeRemoteFilePaths returns completions for remote file paths.
+func (a *App) completeRemoteFilePaths(searchDir, filePrefix, prefix, fullLine string) []string {
+	var completions []string
+
+	// Execute ls command on remote host to get file list
+	result := a.sshClient.Execute(a.ctx, fmt.Sprintf("ls -1a %s 2>/dev/null", sshclient.ShellEscape(searchDir)))
+	if result.Error != nil || result.ExitCode != 0 {
+		return completions
+	}
+
+	// Build the prefix for the full line (everything before the file we're completing)
+	linePrefix := fullLine
+	if len(prefix) > 0 {
+		linePrefix = strings.TrimSuffix(fullLine, prefix)
+	}
+
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	for _, name := range lines {
+		name = strings.TrimSpace(name)
+		if name == "" || name == "." || name == ".." {
+			continue
+		}
+		if strings.HasPrefix(name, filePrefix) {
+			var completion string
+			if strings.HasPrefix(prefix, "/") {
+				completion = filepath.Join(searchDir, name)
+			} else if strings.Contains(prefix, "/") {
+				completion = filepath.Join(filepath.Dir(prefix), name)
+			} else {
+				completion = name
+			}
+			
+			// Check if it's a directory (execute stat on remote)
+			checkPath := filepath.Join(searchDir, name)
+			checkResult := a.sshClient.Execute(a.ctx, fmt.Sprintf("test -d %s && echo 'dir'", sshclient.ShellEscape(checkPath)))
+			if strings.TrimSpace(checkResult.Stdout) == "dir" {
+				completion += "/"
+			}
+			
+			completions = append(completions, linePrefix+completion)
+		}
+	}
+
+	return completions
 }
 
 func isConnectionRequest(input string) bool {

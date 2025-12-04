@@ -18,9 +18,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/term"
 )
@@ -30,6 +33,7 @@ import (
 type LocalClient struct {
 	hostname string
 	username string
+	cwd      string // current working directory
 }
 
 // NewLocalClient creates a new local client.
@@ -42,9 +46,15 @@ func NewLocalClient() *LocalClient {
 	if u, err := user.Current(); err == nil {
 		username = u.Username
 	}
+	// Get the initial working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "/"
+	}
 	return &LocalClient{
 		hostname: hostname,
 		username: username,
+		cwd:      cwd,
 	}
 }
 
@@ -52,7 +62,14 @@ func NewLocalClient() *LocalClient {
 func (c *LocalClient) Execute(ctx context.Context, command string) *ExecuteResult {
 	result := &ExecuteResult{}
 
+	// Handle cd command specially to track directory changes
+	command = strings.TrimSpace(command)
+	if strings.HasPrefix(command, "cd ") || command == "cd" {
+		return c.handleCd(command)
+	}
+
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = c.cwd // Execute in the tracked working directory
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -74,10 +91,69 @@ func (c *LocalClient) Execute(ctx context.Context, command string) *ExecuteResul
 	return result
 }
 
+// handleCd handles the cd command by changing the tracked working directory.
+func (c *LocalClient) handleCd(command string) *ExecuteResult {
+	result := &ExecuteResult{}
+
+	// Parse the target directory
+	target := strings.TrimSpace(strings.TrimPrefix(command, "cd"))
+	if target == "" || target == "~" {
+		// cd or cd ~ goes to home directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			result.Error = fmt.Errorf("cannot get home directory: %w", err)
+			return result
+		}
+		target = homeDir
+	} else if strings.HasPrefix(target, "~/") {
+		// Expand ~ prefix
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			result.Error = fmt.Errorf("cannot get home directory: %w", err)
+			return result
+		}
+		target = filepath.Join(homeDir, target[2:])
+	} else if !filepath.IsAbs(target) {
+		// Make relative path absolute based on current directory
+		target = filepath.Join(c.cwd, target)
+	}
+
+	// Clean the path to handle . and ..
+	target = filepath.Clean(target)
+
+	// Verify the directory exists and is a directory
+	info, err := os.Stat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			result.Stderr = fmt.Sprintf("cd: %s: No such file or directory\n", target)
+			result.ExitCode = 1
+		} else {
+			result.Error = err
+		}
+		return result
+	}
+
+	if !info.IsDir() {
+		result.Stderr = fmt.Sprintf("cd: %s: Not a directory\n", target)
+		result.ExitCode = 1
+		return result
+	}
+
+	// Update the current working directory
+	c.cwd = target
+	return result
+}
+
+// GetCwd returns the current working directory.
+func (c *LocalClient) GetCwd() string {
+	return c.cwd
+}
+
 // ExecuteInteractive executes an interactive command (like top, htop) on the local host
 // with PTY support. It connects the command's stdin/stdout/stderr to the current terminal.
 func (c *LocalClient) ExecuteInteractive(ctx context.Context, command string) error {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = c.cwd // Execute in the tracked working directory
 
 	// Connect to current terminal
 	cmd.Stdin = os.Stdin

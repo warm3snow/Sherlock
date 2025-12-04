@@ -34,6 +34,15 @@ import (
 	"golang.org/x/term"
 )
 
+// ShellEscape escapes a string for safe use in shell commands.
+// It wraps the string in single quotes and escapes any single quotes within.
+func ShellEscape(s string) string {
+	// Single quotes are the safest way to escape in shell
+	// Replace single quotes with '\'' (end quote, escaped quote, start quote)
+	escaped := strings.ReplaceAll(s, "'", "'\\''")
+	return "'" + escaped + "'"
+}
+
 // AuthMethod represents the SSH authentication method.
 type AuthMethod string
 
@@ -61,6 +70,7 @@ type Client struct {
 	sshConfig   *ssh.ClientConfig
 	isConnected bool
 	agentConn   net.Conn // Connection to SSH agent, if used
+	cwd         string   // current working directory on remote host
 }
 
 // Config holds the configuration for creating a new SSH client.
@@ -352,6 +362,10 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 		return result
 	}
 
+	// Handle cd command specially to track directory changes
+	command = strings.TrimSpace(command)
+	isCdCommand := strings.HasPrefix(command, "cd ") || command == "cd"
+
 	session, err := c.client.NewSession()
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create session: %w", err)
@@ -363,6 +377,49 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
+	// Prepend cd to the command if we have a tracked working directory
+	fullCommand := command
+	if c.cwd != "" && !isCdCommand {
+		// For regular commands, cd to the tracked directory first
+		fullCommand = fmt.Sprintf("cd %s && %s", ShellEscape(c.cwd), command)
+	} else if isCdCommand {
+		// For cd commands, we need to track the new directory
+		// First, resolve the target directory on the remote host
+		target := strings.TrimSpace(strings.TrimPrefix(command, "cd"))
+		if target == "" {
+			target = "~"
+		}
+		
+		var resolveCmd string
+		if c.cwd != "" && target != "" && !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~") {
+			// Relative path - resolve from current directory
+			resolveCmd = fmt.Sprintf("cd %s && cd %s && pwd", ShellEscape(c.cwd), ShellEscape(target))
+		} else {
+			resolveCmd = fmt.Sprintf("cd %s && pwd", ShellEscape(target))
+		}
+		
+		err = session.Run(resolveCmd)
+		if err != nil {
+			result.Stdout = stdout.String()
+			result.Stderr = stderr.String()
+			var exitErr *ssh.ExitError
+			if errors.As(err, &exitErr) {
+				result.ExitCode = exitErr.ExitStatus()
+			} else {
+				result.Error = err
+			}
+			return result
+		}
+		
+		// Update the tracked working directory
+		newCwd := strings.TrimSpace(stdout.String())
+		if newCwd != "" {
+			c.cwd = newCwd
+		}
+		return result
+	}
+
+	err = session.Run(fullCommand)
 	// Set TERM environment variable to ensure commands like 'clear' work properly.
 	// We prepend the export command to handle cases where the server doesn't accept
 	// environment variables via Setenv (depends on AcceptEnv in sshd_config).
@@ -388,6 +445,11 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	}
 
 	return result
+}
+
+// GetCwd returns the current working directory on the remote host.
+func (c *Client) GetCwd() string {
+	return c.cwd
 }
 
 // ExecuteInteractive executes an interactive command (like top, htop) on the remote host
@@ -464,8 +526,14 @@ func (c *Client) ExecuteInteractive(_ context.Context, command string) error {
 		}
 	}()
 
+	// Prepend cd to the command if we have a tracked working directory
+	fullCommand := command
+	if c.cwd != "" {
+		fullCommand = fmt.Sprintf("cd %s && %s", ShellEscape(c.cwd), command)
+	}
+
 	// Start the command
-	if err := session.Start(command); err != nil {
+	if err := session.Start(fullCommand); err != nil {
 		return fmt.Errorf("failed to start command: %w", err)
 	}
 
