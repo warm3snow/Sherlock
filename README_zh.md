@@ -22,6 +22,7 @@ Sherlock 是一个基于 AI 的远程运维工具，底层基于 SSH。它可以
 | **学习曲线** | ❌ 对新手有较高门槛 | ✅ 直观的自然语言界面 |
 | **多步操作** | ❌ 需要手动命令串联 | ✅ AI 理解复杂任务 |
 | **多语言支持** | ❌ 仅支持英文命令 | ✅ 支持多种语言的命令 |
+| **主题换肤** | ❌ 仅有纯终端界面 | ✅ 多种颜色主题可选（default、dracula、solarized） |
 
 #### 核心优势
 
@@ -294,13 +295,9 @@ Apache License 2.0
 - 🔧 提交 Pull Request 帮助改进项目
 - 📖 完善项目文档
 
-## ☕ 支持项目
+## 💬 联系方式
 
-如果这个项目对您有帮助，欢迎请我喝杯咖啡！您的支持是对我最大的鼓励，也是项目持续发展的动力。
-
-<a href="https://www.buymeacoffee.com/warm3snow">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=warm3snow&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
-</a>
+如果需要个人帮助，请加微信：**warm3snow**
 
 ---
 

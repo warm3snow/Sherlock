@@ -22,6 +22,7 @@ Sherlock is an AI-based remote operations tool built on SSH. It enables you to i
 | **Learning Curve** | ❌ Steep learning curve for beginners | ✅ Intuitive natural language interface |
 | **Multi-step Operations** | ❌ Manual command chaining | ✅ AI understands complex tasks |
 | **Cross-language Support** | ❌ English commands only | ✅ Supports commands in multiple languages |
+| **Theme Support** | ❌ Plain terminal only | ✅ Multiple color themes (default, dracula, solarized) |
 
 #### Key Advantages
 
@@ -309,13 +310,9 @@ Contributions are welcome! Feel free to:
 - 🔧 Submit Pull Requests to help improve the project
 - 📖 Improve documentation
 
-## ☕ Support
+## 💬 Contact
 
-If this project has been helpful to you, consider buying me a coffee! Your support is greatly appreciated and helps keep this project active.
-
-<a href="https://www.buymeacoffee.com/warm3snow">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=warm3snow&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
-</a>
+If you need personal assistance, please add me on WeChat: **warm3snow**
 
 ---
 
