@@ -248,30 +248,19 @@ func (a *App) handleInput(input string) error {
 		return a.handleDirectCommand(strings.TrimPrefix(input, "$"))
 	}
 
-	// Check if connected
-	if a.sshClient == nil || !a.sshClient.IsConnected() {
-		// Try to parse as connection request
-		if isConnectionRequest(input) {
-			return a.handleConnect(input)
-		}
-
-		// Check if it's a history query in natural language
-		if isHistoryRequest(input) {
-			return a.handleHistoryRequest(input)
-		}
-
-		// Check if it's a hosts query in natural language
-		if isHostsRequest(input) {
-			return a.showHosts()
-		}
-
-		fmt.Println("Not connected to any host. Use 'connect <host>' or describe a connection.")
-		return nil
-	}
-
 	// Try to parse as connection request first
 	if isConnectionRequest(input) {
 		return a.handleConnect(input)
+	}
+
+	// Check if it's a history query in natural language
+	if isHistoryRequest(input) {
+		return a.handleHistoryRequest(input)
+	}
+
+	// Check if it's a hosts query in natural language
+	if isHostsRequest(input) {
+		return a.showHosts()
 	}
 
 	// Parse as command request (works both locally and remotely)
