@@ -496,3 +496,11 @@ func TestDefaultConfig_HasCorrectModel(t *testing.T) {
 		t.Errorf("Expected default model to be qwen2.5:latest, got %s", cfg.LLM.Model)
 	}
 }
+
+func TestDefaultConfig_HasDraculaTheme(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.UI.Theme != ThemeDracula {
+		t.Errorf("Expected default theme to be dracula, got %s", cfg.UI.Theme)
+	}
+}

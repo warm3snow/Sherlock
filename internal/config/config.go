@@ -156,7 +156,7 @@ func DefaultConfig() *Config {
 			AutoAddToRemote: true,
 		},
 		UI: UIConfig{
-			Theme: ThemeDefault,
+			Theme: ThemeDracula,
     },
 		ShellCommands: ShellCommandsConfig{
 			Whitelist: []string{"kubectl", "helm"},
