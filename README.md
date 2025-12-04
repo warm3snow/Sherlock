@@ -1,5 +1,11 @@
 # Sherlock
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Go Version](https://img.shields.io/badge/Go-1.18+-00ADD8?logo=go)](https://golang.org/)
+[![GitHub stars](https://img.shields.io/github/stars/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/warm3snow/sherlock)](https://github.com/warm3snow/sherlock/issues)
+
 [English](README.md) | [中文](README_zh.md)
 
 ## Sherlock - AI-powered SSH Remote Operations Tool
@@ -271,3 +277,38 @@ Sherlock/
 ### License
 
 Apache License 2.0
+
+---
+
+## ⭐ Star History
+
+If you find Sherlock helpful, please consider giving it a star! Your support helps us grow and improve.
+
+<a href="https://www.star-history.com/#warm3snow/sherlock&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
+ </picture>
+</a>
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to:
+
+- ⭐ Star this repository if you find it useful
+- 🐛 Report bugs or request features through [Issues](https://github.com/warm3snow/sherlock/issues)
+- 🔧 Submit Pull Requests to help improve the project
+- 📖 Improve documentation
+
+## ☕ Support
+
+If this project has been helpful to you, consider buying me a coffee! Your support is greatly appreciated and helps keep this project active.
+
+<a href="https://www.buymeacoffee.com/warm3snow">
+  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=warm3snow&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
+</a>
+
+---
+
+<p align="center">Made with ❤️ by <a href="https://github.com/warm3snow">warm3snow</a></p>

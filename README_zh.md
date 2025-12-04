@@ -1,5 +1,11 @@
 # Sherlock
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Go Version](https://img.shields.io/badge/Go-1.18+-00ADD8?logo=go)](https://golang.org/)
+[![GitHub stars](https://img.shields.io/github/stars/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/warm3snow/sherlock)](https://github.com/warm3snow/sherlock/issues)
+
 [English](README.md) | [中文](README_zh.md)
 
 ## Sherlock - 基于AI的远程运维工具
@@ -256,3 +262,38 @@ Sherlock/
 ### 开源协议
 
 Apache License 2.0
+
+---
+
+## ⭐ Star 趋势
+
+如果您觉得 Sherlock 对您有帮助，欢迎给我们一个 Star！您的支持是我们持续改进的动力。
+
+<a href="https://www.star-history.com/#warm3snow/sherlock&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
+ </picture>
+</a>
+
+## 🤝 参与贡献
+
+欢迎贡献！您可以通过以下方式参与：
+
+- ⭐ 如果觉得有用，给项目点个 Star
+- 🐛 通过 [Issues](https://github.com/warm3snow/sherlock/issues) 报告 Bug 或提出新功能建议
+- 🔧 提交 Pull Request 帮助改进项目
+- 📖 完善项目文档
+
+## ☕ 支持项目
+
+如果这个项目对您有帮助，欢迎请我喝杯咖啡！您的支持是对我最大的鼓励，也是项目持续发展的动力。
+
+<a href="https://www.buymeacoffee.com/warm3snow">
+  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=warm3snow&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
+</a>
+
+---
+
+<p align="center">用 ❤️ 制作 by <a href="https://github.com/warm3snow">warm3snow</a></p>

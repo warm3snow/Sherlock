@@ -149,7 +149,7 @@ func DefaultConfig() *Config {
 		LLM: LLMConfig{
 			Provider:    ProviderOllama,
 			BaseURL:     "http://localhost:11434",
-			Model:       "qwen2.5:7b",
+			Model:       "qwen2.5:latest",
 			Temperature: 0.7,
 		},
 		SSHKey: SSHKeyConfig{
@@ -157,6 +157,9 @@ func DefaultConfig() *Config {
 		},
 		UI: UIConfig{
 			Theme: ThemeDefault,
+    },
+		ShellCommands: ShellCommandsConfig{
+			Whitelist: []string{"kubectl", "helm"},
 		},
 	}
 
@@ -199,11 +202,18 @@ func (c *Config) Validate() error {
 }
 
 // LoadConfig loads configuration from a file.
+// If the config file doesn't exist, it creates one with default values.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultConfig(), nil
+			// Create default config and save it
+			cfg := DefaultConfig()
+			if saveErr := SaveConfig(path, cfg); saveErr != nil {
+				// Log the save error but continue with the default config
+				fmt.Fprintf(os.Stderr, "Warning: Failed to save default config to %s: %v\n", path, saveErr)
+			}
+			return cfg, nil
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
