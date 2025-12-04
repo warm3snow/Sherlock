@@ -157,7 +157,7 @@ func DefaultConfig() *Config {
 		},
 		UI: UIConfig{
 			Theme: ThemeDracula,
-    },
+		},
 		ShellCommands: ShellCommandsConfig{
 			Whitelist: []string{"kubectl", "helm"},
 		},

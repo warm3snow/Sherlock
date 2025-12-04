@@ -363,6 +363,17 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
+	// Set TERM environment variable to ensure commands like 'clear' work properly.
+	// We prepend the export command to handle cases where the server doesn't accept
+	// environment variables via Setenv (depends on AcceptEnv in sshd_config).
+	termType := os.Getenv("TERM")
+	if termType == "" || !isValidTermType(termType) {
+		termType = "xterm-256color"
+	}
+	// Use single quotes for additional shell safety, even though isValidTermType
+	// already ensures the value contains only safe characters.
+	command = fmt.Sprintf("export TERM='%s'; %s", termType, command)
+
 	err = session.Run(command)
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
@@ -537,4 +548,19 @@ func GetDefaultKeyPaths() []string {
 		filepath.Join(sshDir, "id_rsa"),
 		filepath.Join(sshDir, "id_dsa"),
 	}
+}
+
+// isValidTermType validates that a TERM value contains only safe characters.
+// Valid TERM values should only contain alphanumeric characters, hyphens, and underscores.
+// This prevents potential command injection through malicious TERM values.
+func isValidTermType(term string) bool {
+	if term == "" {
+		return false
+	}
+	for _, c := range term {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
