@@ -189,6 +189,104 @@ func parseConnectionDirect(request string) *ConnectionInfo {
 	return nil
 }
 
+// commonShellCommands contains shell command prefixes that can be executed directly
+// without LLM translation.
+var commonShellCommands = []string{
+	// File and directory operations
+	"ls", "ll", "la", "dir", "cd", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
+	"touch", "cat", "head", "tail", "less", "more", "find", "locate", "tree",
+	"ln", "file", "stat", "du", "df", "mount", "umount",
+	// Text processing
+	"grep", "awk", "sed", "cut", "sort", "uniq", "wc", "tr", "diff", "comm",
+	"xargs", "tee",
+	// System information
+	"uname", "hostname", "uptime", "date", "cal", "who", "w", "id", "whoami",
+	"last", "lastlog", "free", "top", "htop", "vmstat", "iostat", "sar",
+	"lscpu", "lsmem", "lsblk", "lspci", "lsusb", "dmesg", "journalctl",
+	// Process management
+	"ps", "kill", "killall", "pkill", "pgrep", "nice", "renice", "nohup",
+	"jobs", "bg", "fg", "disown",
+	// Network
+	"ping", "traceroute", "tracepath", "netstat", "ss", "ip", "ifconfig",
+	"route", "arp", "dig", "nslookup", "host", "wget", "curl", "nc", "telnet",
+	"ssh", "scp", "rsync", "ftp", "sftp", "iptables", "nft", "firewall-cmd",
+	// Package management
+	"apt", "apt-get", "dpkg", "yum", "dnf", "rpm", "pacman", "zypper", "brew",
+	"pip", "pip3", "npm", "yarn", "gem", "cargo", "go",
+	// Service management
+	"systemctl", "service", "chkconfig", "update-rc.d",
+	// User and permission management
+	"useradd", "userdel", "usermod", "groupadd", "groupdel", "groupmod",
+	"passwd", "chown", "chmod", "chgrp", "sudo", "su",
+	// Archive and compression
+	"tar", "gzip", "gunzip", "zip", "unzip", "bzip2", "xz", "7z",
+	// Disk and filesystem
+	"fdisk", "parted", "mkfs", "fsck", "dd", "sync",
+	// Environment
+	"env", "export", "set", "unset", "source", "alias", "unalias", "echo",
+	"printf", "read", "test",
+	// Editors and viewers
+	"vi", "vim", "nano", "emacs", "ed",
+	// Other utilities
+	"man", "info", "which", "whereis", "type", "clear",
+	"reset", "shutdown", "reboot", "halt", "poweroff",
+	"sleep", "watch", "timeout", "time", "seq", "yes", "true", "false",
+	// Docker and container
+	"docker", "docker-compose", "podman", "kubectl", "crictl",
+	// Version control
+	"git", "svn", "hg",
+}
+
+// IsShellCommand checks if the input looks like a common shell command.
+// It returns true if the input starts with a known command prefix.
+func IsShellCommand(input string) bool {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return false
+	}
+
+	// Get the first word (command name)
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false
+	}
+
+	cmdName := strings.ToLower(parts[0])
+
+	// Check if it matches a common shell command
+	for _, cmd := range commonShellCommands {
+		if cmdName == cmd {
+			return true
+		}
+	}
+
+	// Check for commands with path prefix (e.g., /usr/bin/ls, ./script.sh)
+	if strings.HasPrefix(input, "/") || strings.HasPrefix(input, "./") || strings.HasPrefix(input, "../") {
+		return true
+	}
+
+	return false
+}
+
+// parseCommandDirect handles commands that can be executed directly without LLM.
+func parseCommandDirect(request string) *CommandInfo {
+	cmd := strings.TrimSpace(request)
+	if cmd == "" {
+		return nil
+	}
+
+	// Check if it's a shell command
+	if IsShellCommand(cmd) {
+		return &CommandInfo{
+			Commands:     []string{cmd},
+			Description:  "Direct shell command execution",
+			NeedsConfirm: false,
+		}
+	}
+
+	return nil
+}
+
 // ParseCommandRequest parses a natural language command request.
 func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*CommandInfo, error) {
 	// Check for direct command execution with $ prefix
@@ -202,6 +300,12 @@ func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*Comma
 		}, nil
 	}
 
+	// Check if it's a common shell command that can be executed directly
+	if info := parseCommandDirect(request); info != nil {
+		return info, nil
+	}
+
+	// Fall back to AI parsing for natural language requests
 	messages := []*schema.Message{
 		schema.SystemMessage(systemPromptCommand),
 		schema.UserMessage(request),
