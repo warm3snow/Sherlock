@@ -80,3 +80,26 @@ func TestContainsValidIP(t *testing.T) {
 		})
 	}
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "no ANSI codes", input: "hello world", want: "hello world"},
+		{name: "single color code", input: "\033[31mred text\033[0m", want: "red text"},
+		{name: "multiple color codes", input: "\033[1;32mgreen\033[0m and \033[34mblue\033[0m", want: "green and blue"},
+		{name: "prompt with colors", input: "\033[95m\033[1msherlock[\033[0m\033[96mlocal\033[0m\033[92m]> \033[0m", want: "sherlock[local]> "},
+		{name: "empty string", input: "", want: ""},
+		{name: "only ANSI codes", input: "\033[0m\033[1m\033[31m", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripANSI(tt.input); got != tt.want {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

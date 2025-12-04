@@ -46,6 +46,16 @@ const (
 	description = "AI-powered SSH remote operations tool"
 )
 
+// ansiRegex matches ANSI color/style escape sequences (e.g., \033[31m, \033[1;32m).
+// This handles the common color codes used in terminal prompts.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripANSI removes ANSI escape codes from a string.
+// Used when the liner library rejects prompts with control characters.
+func stripANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
 // App represents the Sherlock application.
 type App struct {
 	cfg            *config.Config
@@ -232,6 +242,11 @@ func (a *App) run() error {
 		prompt := a.theme.FormatPrompt("sherlock[", hostStr, "]> ")
 
 		input, err := a.liner.Prompt(prompt)
+		if err == liner.ErrInvalidPrompt {
+			// Prompt contains ANSI codes that liner rejects (e.g., when input is redirected).
+			// Fall back to a plain prompt without escape sequences.
+			input, err = a.liner.Prompt(stripANSI(prompt))
+		}
 		if err != nil {
 			if err == liner.ErrPromptAborted || err == io.EOF {
 				fmt.Println("\nGoodbye!")
