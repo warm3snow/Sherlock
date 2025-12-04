@@ -50,36 +50,6 @@ type HostInfo struct {
 	User string
 }
 
-// ParseHostInfo parses a host string in the format [user@]host[:port].
-func ParseHostInfo(hostStr string) (*HostInfo, error) {
-	info := &HostInfo{
-		Port: 22,
-	}
-
-	// Parse user@host:port format
-	if strings.Contains(hostStr, "@") {
-		parts := strings.SplitN(hostStr, "@", 2)
-		info.User = parts[0]
-		hostStr = parts[1]
-	}
-
-	// Parse host:port format
-	host, port, err := net.SplitHostPort(hostStr)
-	if err != nil {
-		// No port specified
-		info.Host = hostStr
-	} else {
-		info.Host = host
-		fmt.Sscanf(port, "%d", &info.Port)
-	}
-
-	if info.Host == "" {
-		return nil, errors.New("host is required")
-	}
-
-	return info, nil
-}
-
 // Client represents an SSH client.
 type Client struct {
 	client      *ssh.Client
@@ -263,17 +233,6 @@ func applySSHConfig(sshConfig *SSHConfig, hostInfo *HostInfo) (*HostInfo, []stri
 	return result, configHost.IdentityFile
 }
 
-// sshAgentAuth creates an ssh.AuthMethod from the SSH agent.
-// It returns the auth method and the connection to the agent (which should be closed when done).
-// Deprecated: Use getAgentSigners instead for consolidated key handling.
-func sshAgentAuth() (ssh.AuthMethod, net.Conn) {
-	signers, conn := getAgentSigners()
-	if len(signers) == 0 {
-		return nil, nil
-	}
-	return ssh.PublicKeys(signers...), conn
-}
-
 // getAgentSigners retrieves all signers from the SSH agent.
 // It returns the signers and the connection to the agent (which should be closed when done).
 func getAgentSigners() ([]ssh.Signer, net.Conn) {
@@ -295,16 +254,6 @@ func getAgentSigners() ([]ssh.Signer, net.Conn) {
 	}
 
 	return signers, conn
-}
-
-// publicKeyAuth creates an ssh.AuthMethod from a private key file.
-// Deprecated: Use loadPrivateKey instead for consolidated key handling.
-func publicKeyAuth(keyPath, passphrase string) (ssh.AuthMethod, error) {
-	signer, err := loadPrivateKey(keyPath, passphrase)
-	if err != nil {
-		return nil, err
-	}
-	return ssh.PublicKeys(signer), nil
 }
 
 // loadPrivateKey loads a private key from a file and returns an ssh.Signer.
@@ -471,14 +420,6 @@ func (c *Client) HostInfoString() string {
 		return ""
 	}
 	return fmt.Sprintf("%s@%s:%d", c.hostInfo.User, c.hostInfo.Host, c.hostInfo.Port)
-}
-
-// GetSSHKeyPaths returns the default SSH key paths (for backward compatibility).
-func GetSSHKeyPaths() (privateKeyPath, publicKeyPath string) {
-	homeDir, _ := os.UserHomeDir()
-	privateKeyPath = filepath.Join(homeDir, ".ssh", "id_rsa")
-	publicKeyPath = filepath.Join(homeDir, ".ssh", "id_rsa.pub")
-	return
 }
 
 // GetDefaultKeyPaths returns all default SSH private key paths to try.

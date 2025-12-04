@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -158,34 +157,10 @@ func (m *Manager) AddRecord(host string, port int, user string, hasPubKey bool) 
 	return nil
 }
 
-// MarkPubKeyAdded marks a host as having public key added.
-func (m *Manager) MarkPubKeyAdded(host string, port int, user string) error {
-	updateSQL := `UPDATE hosts SET has_pub_key = TRUE WHERE host = ? AND port = ? AND user = ?`
-	_, err := m.db.Exec(updateSQL, host, port, user)
-	return err
-}
-
-// HasPubKey checks if a host has public key added.
-func (m *Manager) HasPubKey(host string, port int, user string) bool {
-	var hasPubKey bool
-	query := `SELECT has_pub_key FROM hosts WHERE host = ? AND port = ? AND user = ?`
-	err := m.db.QueryRow(query, host, port, user).Scan(&hasPubKey)
-	if err != nil {
-		return false
-	}
-	return hasPubKey
-}
-
 // GetRecords returns all history records, sorted by timestamp (newest first).
 func (m *Manager) GetRecords() []Record {
 	query := `SELECT id, host, port, user, timestamp, has_pub_key, login_count FROM hosts ORDER BY timestamp DESC`
 	return m.queryRecords(query)
-}
-
-// GetRecentRecords returns the most recent N history records.
-func (m *Manager) GetRecentRecords(n int) []Record {
-	query := `SELECT id, host, port, user, timestamp, has_pub_key, login_count FROM hosts ORDER BY timestamp DESC LIMIT ?`
-	return m.queryRecordsWithArgs(query, n)
 }
 
 // SearchRecords searches for records matching the query.
@@ -274,56 +249,4 @@ func (m *Manager) scanRecords(rows *sql.Rows) []Record {
 		records = append(records, r)
 	}
 	return records
-}
-
-// FormatRecords returns a formatted string of history records.
-func FormatRecords(records []Record) string {
-	if len(records) == 0 {
-		return "No login history found.\n"
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Login History:\n")
-	sb.WriteString(strings.Repeat("-", 70) + "\n")
-	sb.WriteString(fmt.Sprintf("%-4s %-30s %-6s %-20s\n", "ID", "Host", "Logins", "Last Login"))
-	sb.WriteString(strings.Repeat("-", 70) + "\n")
-
-	for _, r := range records {
-		pubKeyStatus := ""
-		if r.HasPubKey {
-			pubKeyStatus = " [key]"
-		}
-		sb.WriteString(fmt.Sprintf("%-4d %-30s %-6d %s%s\n",
-			r.ID,
-			r.HostKey(),
-			r.LoginCount,
-			r.Timestamp.Format("2006-01-02 15:04:05"),
-			pubKeyStatus))
-	}
-
-	return sb.String()
-}
-
-// FormatHostsSimple returns a simple formatted string of hosts for quick selection.
-func FormatHostsSimple(records []Record) string {
-	if len(records) == 0 {
-		return "No saved hosts found.\n"
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Saved Hosts:\n")
-	sb.WriteString(strings.Repeat("-", 50) + "\n")
-
-	for _, r := range records {
-		pubKeyStatus := ""
-		if r.HasPubKey {
-			pubKeyStatus = " [key]"
-		}
-		sb.WriteString(fmt.Sprintf("[%d] %s%s\n", r.ID, r.HostKey(), pubKeyStatus))
-	}
-
-	sb.WriteString(strings.Repeat("-", 50) + "\n")
-	sb.WriteString("Use 'connect <id>' to connect to a saved host.\n")
-
-	return sb.String()
 }

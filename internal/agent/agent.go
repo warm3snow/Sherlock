@@ -423,27 +423,6 @@ func extractJSON(content string) string {
 	return content
 }
 
-// GenerateShellResponse generates a natural language response for command output.
-func (a *Agent) GenerateShellResponse(ctx context.Context, command string, output string) (string, error) {
-	systemPrompt := `You are Sherlock, an AI assistant for SSH remote operations.
-The user has executed a command. Provide a brief, helpful summary of the output.
-Keep your response concise and highlight any important information or issues.`
-
-	userPrompt := fmt.Sprintf("Command executed: %s\n\nOutput:\n%s", command, output)
-
-	messages := []*schema.Message{
-		schema.SystemMessage(systemPrompt),
-		schema.UserMessage(userPrompt),
-	}
-
-	response, err := a.aiClient.Generate(ctx, messages)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate response: %w", err)
-	}
-
-	return strings.TrimSpace(response.Content), nil
-}
-
 // ToHostInfo converts ConnectionInfo to sshclient.HostInfo.
 func (c *ConnectionInfo) ToHostInfo() *sshclient.HostInfo {
 	return &sshclient.HostInfo{

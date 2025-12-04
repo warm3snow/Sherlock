@@ -236,27 +236,3 @@ func CreateHostKeyCallback(strictHostKeyChecking bool) ssh.HostKeyCallback {
 		return err
 	}
 }
-
-// AddKnownHost adds a host key to the known_hosts file.
-func AddKnownHost(hostname string, remote net.Addr, key ssh.PublicKey) error {
-	knownHostsPath := GetKnownHostsPath()
-
-	// Ensure .ssh directory exists
-	sshDir := filepath.Dir(knownHostsPath)
-	if err := os.MkdirAll(sshDir, 0700); err != nil {
-		return err
-	}
-
-	// Open file in append mode
-	file, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Format the host key line
-	// Format: hostname,ip key-type base64-key
-	line := knownhosts.Line([]string{hostname}, key)
-	_, err = file.WriteString(line + "\n")
-	return err
-}
