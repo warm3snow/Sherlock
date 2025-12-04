@@ -20,7 +20,11 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
+	"syscall"
+
+	"golang.org/x/term"
 )
 
 // LocalClient represents a local command executor.
@@ -70,6 +74,48 @@ func (c *LocalClient) Execute(ctx context.Context, command string) *ExecuteResul
 	}
 
 	return result
+}
+
+// ExecuteInteractive executes an interactive command (like top, htop) on the local host
+// with PTY support. It connects the command's stdin/stdout/stderr to the current terminal.
+func (c *LocalClient) ExecuteInteractive(ctx context.Context, command string) error {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+
+	// Connect to current terminal
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Put terminal into raw mode if it's a terminal
+	fd := int(os.Stdin.Fd())
+	var oldState *term.State
+	var err error
+	if term.IsTerminal(fd) {
+		oldState, err = term.MakeRaw(fd)
+		if err != nil {
+			// Fallback to non-raw mode if we can't set raw mode
+			return cmd.Run()
+		}
+		defer term.Restore(fd, oldState)
+	}
+
+	// Handle signals to restore terminal state
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+
+	// Run the command
+	err = cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// Command exited with non-zero status, but that's not necessarily an error
+			return nil
+		}
+		return err
+	}
+
+	return nil
 }
 
 // IsConnected always returns true for local client.

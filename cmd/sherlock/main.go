@@ -465,6 +465,11 @@ func (a *App) handleCommandRequest(input string) error {
 }
 
 func (a *App) executeCommand(cmd string) error {
+	// Check if this is an interactive command that needs PTY support
+	if sshclient.IsInteractiveCommand(cmd) {
+		return a.executeInteractiveCommand(cmd)
+	}
+
 	var result *sshclient.ExecuteResult
 
 	// Use SSH client if connected, otherwise use local client
@@ -490,6 +495,17 @@ func (a *App) executeCommand(cmd string) error {
 	}
 
 	return nil
+}
+
+// executeInteractiveCommand executes an interactive command with PTY support.
+func (a *App) executeInteractiveCommand(cmd string) error {
+	fmt.Println(a.theme.FormatInfo("Running in interactive mode. Press Ctrl+C to exit."))
+
+	// Use SSH client if connected, otherwise use local client
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		return a.sshClient.ExecuteInteractive(a.ctx, cmd)
+	}
+	return a.localClient.ExecuteInteractive(a.ctx, cmd)
 }
 
 func (a *App) disconnect() error {

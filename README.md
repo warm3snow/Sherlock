@@ -218,7 +218,15 @@ show my hosts             Show all saved hosts
 $ls -la                 Execute command directly
 show me disk usage      Natural language command
 list running processes  Natural language command
+
+# Interactive commands with PTY support
+$top                    System monitoring with full terminal support
+$htop                   Interactive process viewer
+$vim /etc/hosts         Text editor with full terminal support
+$less /var/log/syslog   Pager with full terminal support
 ```
+
+**Note:** Interactive commands like `top`, `htop`, `vim`, `less`, etc. are automatically detected and run with full PTY (pseudo-terminal) support, allowing proper display and keyboard interaction.
 
 ### Examples
 
