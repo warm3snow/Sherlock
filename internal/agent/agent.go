@@ -33,13 +33,27 @@ import (
 
 // Agent handles natural language processing for SSH operations.
 type Agent struct {
-	aiClient ai.ModelClient
+	aiClient            ai.ModelClient
+	customShellCommands map[string]bool
 }
 
 // NewAgent creates a new Agent with the given AI client.
 func NewAgent(aiClient ai.ModelClient) *Agent {
 	return &Agent{
-		aiClient: aiClient,
+		aiClient:            aiClient,
+		customShellCommands: make(map[string]bool),
+	}
+}
+
+// SetCustomShellCommands sets the custom shell commands whitelist.
+// These commands will be executed directly without LLM translation.
+func (a *Agent) SetCustomShellCommands(commands []string) {
+	a.customShellCommands = make(map[string]bool, len(commands))
+	for _, cmd := range commands {
+		cmd = strings.TrimSpace(strings.ToLower(cmd))
+		if cmd != "" {
+			a.customShellCommands[cmd] = true
+		}
 	}
 }
 
@@ -290,8 +304,8 @@ func isDangerousCommand(input string) bool {
 }
 
 // IsShellCommand checks if the input looks like a common shell command.
-// It returns true if the input starts with a known command prefix.
-func IsShellCommand(input string) bool {
+// It returns true if the input starts with a known command prefix or is in the custom whitelist.
+func (a *Agent) IsShellCommand(input string) bool {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return false
@@ -304,7 +318,12 @@ func IsShellCommand(input string) bool {
 	}
 	cmdName := strings.ToLower(parts[0])
 
-	// O(1) lookup using map
+	// Check custom whitelist first (O(1) lookup)
+	if a.customShellCommands[cmdName] {
+		return true
+	}
+
+	// O(1) lookup using built-in map
 	if commonShellCommandsMap[cmdName] {
 		return true
 	}
@@ -319,14 +338,14 @@ func IsShellCommand(input string) bool {
 }
 
 // parseCommandDirect handles commands that can be executed directly without LLM.
-func parseCommandDirect(request string) *CommandInfo {
+func (a *Agent) parseCommandDirect(request string) *CommandInfo {
 	cmd := strings.TrimSpace(request)
 	if cmd == "" {
 		return nil
 	}
 
 	// Check if it's a shell command
-	if IsShellCommand(cmd) {
+	if a.IsShellCommand(cmd) {
 		// Generate a more descriptive message based on the command
 		parts := strings.Fields(cmd)
 		cmdName := parts[0]
@@ -356,7 +375,7 @@ func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*Comma
 	}
 
 	// Check if it's a common shell command that can be executed directly
-	if info := parseCommandDirect(request); info != nil {
+	if info := a.parseCommandDirect(request); info != nil {
 		return info, nil
 	}
 

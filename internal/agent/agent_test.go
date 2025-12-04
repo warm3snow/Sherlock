@@ -19,6 +19,9 @@ import (
 )
 
 func TestIsShellCommand(t *testing.T) {
+	// Create a test agent with no custom commands
+	agent := NewAgent(nil)
+
 	tests := []struct {
 		name  string
 		input string
@@ -39,33 +42,33 @@ func TestIsShellCommand(t *testing.T) {
 		{name: "top command", input: "top", want: true},
 		{name: "free command", input: "free -m", want: true},
 		{name: "uptime command", input: "uptime", want: true},
-		
+
 		// Network commands
 		{name: "ping command", input: "ping google.com", want: true},
 		{name: "curl command", input: "curl https://example.com", want: true},
 		{name: "wget command", input: "wget https://example.com/file.tar.gz", want: true},
 		{name: "netstat command", input: "netstat -tlnp", want: true},
 		{name: "ss command", input: "ss -tlnp", want: true},
-		
+
 		// Package management
 		{name: "apt command", input: "apt update", want: true},
 		{name: "yum command", input: "yum install vim", want: true},
 		{name: "pip command", input: "pip install requests", want: true},
 		{name: "npm command", input: "npm install express", want: true},
-		
+
 		// Container commands
 		{name: "docker command", input: "docker ps", want: true},
 		{name: "kubectl command", input: "kubectl get pods", want: true},
-		
+
 		// Version control
 		{name: "git command", input: "git status", want: true},
 		{name: "git log", input: "git log --oneline", want: true},
-		
+
 		// Path-based commands
 		{name: "absolute path script", input: "/usr/bin/ls", want: true},
 		{name: "relative path script", input: "./script.sh", want: true},
 		{name: "parent path script", input: "../script.sh", want: true},
-		
+
 		// Natural language (should not match)
 		{name: "natural language disk usage", input: "show me disk usage", want: false},
 		{name: "natural language list files", input: "list all files", want: false},
@@ -73,7 +76,7 @@ func TestIsShellCommand(t *testing.T) {
 		{name: "natural language process", input: "show running processes", want: false},
 		{name: "help request", input: "help me check disk", want: false},
 		{name: "question format", input: "how much disk space", want: false},
-		
+
 		// Edge cases
 		{name: "empty string", input: "", want: false},
 		{name: "whitespace only", input: "   ", want: false},
@@ -82,7 +85,41 @@ func TestIsShellCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsShellCommand(tt.input); got != tt.want {
+			if got := agent.IsShellCommand(tt.input); got != tt.want {
+				t.Errorf("IsShellCommand(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsShellCommandWithCustomWhitelist(t *testing.T) {
+	// Create a test agent with custom commands
+	agent := NewAgent(nil)
+	agent.SetCustomShellCommands([]string{"mycustomcmd", "another-cmd", "UPPERCASE"})
+
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		// Custom commands should match
+		{name: "custom command", input: "mycustomcmd arg1 arg2", want: true},
+		{name: "another custom command", input: "another-cmd --flag", want: true},
+		{name: "uppercase custom command", input: "uppercase option", want: true},
+		{name: "custom command case insensitive", input: "MYCUSTOMCMD", want: true},
+
+		// Built-in commands should still work
+		{name: "ls command", input: "ls -la", want: true},
+		{name: "git command", input: "git status", want: true},
+
+		// Unknown commands should not match
+		{name: "unknown command", input: "unknowncmd", want: false},
+		{name: "natural language", input: "run my custom command", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := agent.IsShellCommand(tt.input); got != tt.want {
 				t.Errorf("IsShellCommand(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
@@ -90,6 +127,9 @@ func TestIsShellCommand(t *testing.T) {
 }
 
 func TestParseCommandDirect(t *testing.T) {
+	// Create a test agent
+	agent := NewAgent(nil)
+
 	tests := []struct {
 		name        string
 		input       string
@@ -117,7 +157,7 @@ func TestParseCommandDirect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseCommandDirect(tt.input)
+			result := agent.parseCommandDirect(tt.input)
 			if tt.wantNil {
 				if result != nil {
 					t.Errorf("parseCommandDirect(%q) = %v, want nil", tt.input, result)
@@ -184,9 +224,12 @@ func TestIsDangerousCommand(t *testing.T) {
 }
 
 func TestParseCommandDirectNeedsConfirm(t *testing.T) {
+	// Create a test agent
+	agent := NewAgent(nil)
+
 	tests := []struct {
-		name            string
-		input           string
+		name             string
+		input            string
 		wantNeedsConfirm bool
 	}{
 		// Dangerous commands should require confirmation
@@ -206,7 +249,7 @@ func TestParseCommandDirectNeedsConfirm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseCommandDirect(tt.input)
+			result := agent.parseCommandDirect(tt.input)
 			if result == nil {
 				t.Errorf("parseCommandDirect(%q) = nil, want non-nil", tt.input)
 				return
@@ -215,6 +258,34 @@ func TestParseCommandDirectNeedsConfirm(t *testing.T) {
 				t.Errorf("parseCommandDirect(%q).NeedsConfirm = %v, want %v", tt.input, result.NeedsConfirm, tt.wantNeedsConfirm)
 			}
 		})
+	}
+}
+
+func TestSetCustomShellCommands(t *testing.T) {
+	agent := NewAgent(nil)
+
+	// Initially empty
+	if agent.IsShellCommand("mycustomcmd") {
+		t.Error("expected mycustomcmd to not be recognized initially")
+	}
+
+	// Set custom commands
+	agent.SetCustomShellCommands([]string{"mycustomcmd", "another-cmd", "  spaces  ", ""})
+
+	// Check that custom commands are recognized
+	if !agent.IsShellCommand("mycustomcmd arg1") {
+		t.Error("expected mycustomcmd to be recognized after setting")
+	}
+	if !agent.IsShellCommand("another-cmd") {
+		t.Error("expected another-cmd to be recognized")
+	}
+	if !agent.IsShellCommand("spaces --flag") {
+		t.Error("expected 'spaces' to be recognized (trimmed)")
+	}
+
+	// Case insensitive
+	if !agent.IsShellCommand("MYCUSTOMCMD") {
+		t.Error("expected MYCUSTOMCMD to be recognized (case insensitive)")
 	}
 }
 

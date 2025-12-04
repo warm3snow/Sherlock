@@ -52,11 +52,26 @@ You typically don't need to configure SSH keys manually. If you want to override
     "private_key_path": "~/.ssh/id_rsa",
     "public_key_path": "~/.ssh/id_rsa.pub",
     "auto_add_to_remote": true
+  },
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd"]
   }
 }
 ```
 
 **Note:** The `ssh_key` section is optional. If omitted, Sherlock will auto-detect SSH keys.
+
+#### Shell Commands Whitelist
+
+You can add custom shell commands to the whitelist. These commands will be executed directly without LLM translation, improving execution efficiency.
+
+```json
+{
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd", "custom-script"]
+  }
+}
+```
 
 #### LLM Providers
 
@@ -262,11 +277,26 @@ Sherlock 会自动从 `~/.ssh/` 目录检测 SSH 密钥。优先使用 `id_ed255
     "private_key_path": "~/.ssh/id_rsa",
     "public_key_path": "~/.ssh/id_rsa.pub",
     "auto_add_to_remote": true
+  },
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd"]
   }
 }
 ```
 
 **注意：** `ssh_key` 配置项是可选的。如果不配置，Sherlock 会自动检测 SSH 密钥。
+
+#### Shell 命令白名单
+
+您可以在配置文件中添加自定义 shell 命令白名单。这些命令将直接执行，无需 LLM 翻译，从而提高执行效率。
+
+```json
+{
+  "shell_commands": {
+    "whitelist": ["mycustomcmd", "another-cmd", "custom-script"]
+  }
+}
+```
 
 #### LLM 提供商配置
 
