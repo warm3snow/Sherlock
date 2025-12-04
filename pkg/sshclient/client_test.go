@@ -15,6 +15,7 @@
 package sshclient
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,5 +133,128 @@ func TestNewClientWithPassword(t *testing.T) {
 	}
 	if client.IsConnected() {
 		t.Error("Client should not be connected immediately after creation")
+	}
+}
+
+func TestLocalClientCd(t *testing.T) {
+	client := NewLocalClient()
+	ctx := context.Background()
+
+	// Get initial working directory
+	initialCwd := client.GetCwd()
+	if initialCwd == "" {
+		t.Error("Initial cwd should not be empty")
+	}
+
+	// Create a temporary directory for testing
+	tmpDir := t.TempDir()
+
+	// Test cd to absolute path
+	result := client.Execute(ctx, "cd "+tmpDir)
+	if result.Error != nil {
+		t.Errorf("cd to temp directory failed: %v", result.Error)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("cd should have exit code 0, got %d, stderr: %s", result.ExitCode, result.Stderr)
+	}
+	if client.GetCwd() != tmpDir {
+		t.Errorf("cwd should be %s, got %s", tmpDir, client.GetCwd())
+	}
+
+	// Test that subsequent commands run in the new directory
+	result = client.Execute(ctx, "pwd")
+	if result.Error != nil {
+		t.Errorf("pwd failed: %v", result.Error)
+	}
+	pwdOutput := strings.TrimSpace(result.Stdout)
+	if pwdOutput != tmpDir {
+		t.Errorf("pwd should return %s, got %s", tmpDir, pwdOutput)
+	}
+
+	// Test cd with relative path
+	subDir := filepath.Join(tmpDir, "subdir")
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("Failed to create subdir: %v", err)
+	}
+	result = client.Execute(ctx, "cd "+tmpDir)
+	if result.Error != nil {
+		t.Errorf("cd failed: %v", result.Error)
+	}
+	result = client.Execute(ctx, "cd subdir")
+	if result.Error != nil {
+		t.Errorf("cd to subdir failed: %v", result.Error)
+	}
+	if client.GetCwd() != subDir {
+		t.Errorf("cwd should be %s, got %s", subDir, client.GetCwd())
+	}
+
+	// Test cd ..
+	result = client.Execute(ctx, "cd ..")
+	if result.Error != nil {
+		t.Errorf("cd .. failed: %v", result.Error)
+	}
+	if client.GetCwd() != tmpDir {
+		t.Errorf("cwd should be %s after cd .., got %s", tmpDir, client.GetCwd())
+	}
+
+	// Test cd to non-existent directory
+	result = client.Execute(ctx, "cd /nonexistent/directory/path")
+	if result.ExitCode != 1 {
+		t.Errorf("cd to non-existent directory should have exit code 1, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "No such file or directory") {
+		t.Errorf("cd to non-existent directory should have appropriate error message, got: %s", result.Stderr)
+	}
+	// cwd should remain unchanged
+	if client.GetCwd() != tmpDir {
+		t.Errorf("cwd should still be %s after failed cd, got %s", tmpDir, client.GetCwd())
+	}
+
+	// Test cd to home directory (bare cd)
+	result = client.Execute(ctx, "cd")
+	if result.Error != nil {
+		t.Errorf("cd to home failed: %v", result.Error)
+	}
+	homeDir, _ := os.UserHomeDir()
+	if client.GetCwd() != homeDir {
+		t.Errorf("cwd should be home directory %s, got %s", homeDir, client.GetCwd())
+	}
+}
+
+func TestLocalClientCdTilde(t *testing.T) {
+	client := NewLocalClient()
+	ctx := context.Background()
+
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Could not get home directory")
+	}
+
+	// Test cd ~
+	tmpDir := t.TempDir()
+	client.Execute(ctx, "cd "+tmpDir)
+	result := client.Execute(ctx, "cd ~")
+	if result.Error != nil {
+		t.Errorf("cd ~ failed: %v", result.Error)
+	}
+	if client.GetCwd() != homeDir {
+		t.Errorf("cd ~ should go to %s, got %s", homeDir, client.GetCwd())
+	}
+
+	// Test cd ~/subpath (if it exists)
+	// First, go back to temp dir
+	client.Execute(ctx, "cd "+tmpDir)
+
+	// Check if ~/.ssh exists (a common directory)
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if _, err := os.Stat(sshDir); err == nil {
+		result = client.Execute(ctx, "cd ~/.ssh")
+		if result.Error != nil {
+			t.Errorf("cd ~/.ssh failed: %v", result.Error)
+		}
+		if client.GetCwd() != sshDir {
+			t.Errorf("cd ~/.ssh should go to %s, got %s", sshDir, client.GetCwd())
+		}
 	}
 }
