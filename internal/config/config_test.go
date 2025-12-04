@@ -480,10 +480,10 @@ func TestDefaultConfig_HasShellCommandsWhitelist(t *testing.T) {
 
 	expectedWhitelist := []string{"kubectl", "helm"}
 	if len(cfg.ShellCommands.Whitelist) != len(expectedWhitelist) {
-		t.Errorf("Expected shell_commands whitelist length %d, got %d", len(expectedWhitelist), len(cfg.ShellCommands.Whitelist))
+		t.Fatalf("Expected shell_commands whitelist length %d, got %d", len(expectedWhitelist), len(cfg.ShellCommands.Whitelist))
 	}
 	for i, cmd := range expectedWhitelist {
-		if i < len(cfg.ShellCommands.Whitelist) && cfg.ShellCommands.Whitelist[i] != cmd {
+		if cfg.ShellCommands.Whitelist[i] != cmd {
 			t.Errorf("Expected whitelist[%d] to be %s, got %s", i, cmd, cfg.ShellCommands.Whitelist[i])
 		}
 	}

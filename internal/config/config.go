@@ -172,7 +172,7 @@ func LoadConfig(path string) (*Config, error) {
 			cfg := DefaultConfig()
 			if saveErr := SaveConfig(path, cfg); saveErr != nil {
 				// Log the save error but continue with the default config
-				fmt.Fprintf(os.Stderr, "Warning: Failed to save default config: %v\n", saveErr)
+				fmt.Fprintf(os.Stderr, "Warning: Failed to save default config to %s: %v\n", path, saveErr)
 			}
 			return cfg, nil
 		}
