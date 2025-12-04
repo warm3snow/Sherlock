@@ -20,14 +20,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/term"
 )
 
 // AuthMethod represents the SSH authentication method.
@@ -329,6 +333,8 @@ type ExecuteResult struct {
 type Executor interface {
 	// Execute runs a command and returns the result.
 	Execute(ctx context.Context, command string) *ExecuteResult
+	// ExecuteInteractive runs an interactive command with PTY support.
+	ExecuteInteractive(ctx context.Context, command string) error
 	// IsConnected returns true if the executor is ready.
 	IsConnected() bool
 	// Close closes the executor.
@@ -371,6 +377,105 @@ func (c *Client) Execute(_ context.Context, command string) *ExecuteResult {
 	}
 
 	return result
+}
+
+// ExecuteInteractive executes an interactive command (like top, htop) on the remote host
+// with PTY support. It connects the command's stdin/stdout/stderr to the current terminal.
+func (c *Client) ExecuteInteractive(_ context.Context, command string) error {
+	if !c.isConnected {
+		return errors.New("not connected")
+	}
+
+	session, err := c.client.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	// Get terminal size
+	fd := int(os.Stdin.Fd())
+	width, height := 80, 24
+	if term.IsTerminal(fd) {
+		w, h, err := term.GetSize(fd)
+		if err == nil {
+			width, height = w, h
+		}
+	}
+
+	// Request a PTY
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1,
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+	}
+
+	termType := os.Getenv("TERM")
+	if termType == "" {
+		termType = "xterm-256color"
+	}
+
+	if err := session.RequestPty(termType, height, width, modes); err != nil {
+		return fmt.Errorf("failed to request PTY: %w", err)
+	}
+
+	// Set up stdin/stdout/stderr
+	session.Stdout = os.Stdout
+	session.Stderr = os.Stderr
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	// Put terminal into raw mode if it's a terminal
+	var oldState *term.State
+	if term.IsTerminal(fd) {
+		oldState, err = term.MakeRaw(fd)
+		if err != nil {
+			return fmt.Errorf("failed to set raw terminal: %w", err)
+		}
+		defer term.Restore(fd, oldState)
+	}
+
+	// Handle window resize
+	sigwinch := make(chan os.Signal, 1)
+	signal.Notify(sigwinch, syscall.SIGWINCH)
+	defer signal.Stop(sigwinch)
+
+	go func() {
+		for range sigwinch {
+			if term.IsTerminal(fd) {
+				w, h, err := term.GetSize(fd)
+				if err == nil {
+					_ = session.WindowChange(h, w)
+				}
+			}
+		}
+	}()
+
+	// Start the command
+	if err := session.Start(command); err != nil {
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Copy stdin to remote
+	go func() {
+		_, _ = io.Copy(stdin, os.Stdin)
+		stdin.Close()
+	}()
+
+	// Wait for the command to complete
+	err = session.Wait()
+	if err != nil {
+		var exitErr *ssh.ExitError
+		if errors.As(err, &exitErr) {
+			// Command exited with non-zero status, but that's not necessarily an error
+			return nil
+		}
+		return err
+	}
+
+	return nil
 }
 
 // AddPublicKeyToAuthorizedKeys adds the local public key to the remote host's authorized_keys.
