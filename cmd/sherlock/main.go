@@ -239,7 +239,7 @@ func (a *App) handleInput(input string) error {
 	// Handle built-in commands
 	switch strings.ToLower(input) {
 	case "help":
-		printCommandHelp()
+		a.printCommandHelp()
 		return nil
 	case "exit", "quit", "q":
 		a.cleanup()
@@ -668,7 +668,20 @@ func handleHostsCommand() {
 	defer historyMgr.Close()
 
 	records := historyMgr.GetRecords()
-	fmt.Print(history.FormatHostsSimple(records))
+
+	// Use default theme for subcommand output
+	t := theme.DefaultTheme()
+	themeRecords := make([]theme.HistoryRecord, len(records))
+	for i, r := range records {
+		themeRecords[i] = theme.HistoryRecord{
+			ID:         r.ID,
+			HostKey:    r.HostKey(),
+			LoginCount: r.LoginCount,
+			Timestamp:  r.Timestamp.Format("2006-01-02 15:04:05"),
+			HasPubKey:  r.HasPubKey,
+		}
+	}
+	fmt.Print(t.FormatHostsSimple(themeRecords))
 }
 
 func (a *App) printBanner() {
@@ -713,37 +726,41 @@ For more information, visit: https://github.com/warm3snow/Sherlock
 `, appName, description)
 }
 
-func printCommandHelp() {
-	fmt.Print(`
-Available commands:
-  help                    Show this help message
-  exit, quit, q           Exit Sherlock
-  status                  Show current status
-  hosts                   Show all saved hosts
-  history                 Show login history
-  history <query>         Search login history
-  disconnect              Disconnect from remote host (switch to local mode)
+func (a *App) printCommandHelp() {
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("Available commands:"))
+	fmt.Printf("  %s                    %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help message"))
+	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("exit, quit, q"), a.theme.FormatDescription("Exit Sherlock"))
+	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show current status"))
+	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("Show all saved hosts"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("history"), a.theme.FormatDescription("Show login history"))
+	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("history <query>"), a.theme.FormatDescription("Search login history"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("disconnect"), a.theme.FormatDescription("Disconnect from remote host (switch to local mode)"))
 
-Connection:
-  connect <host>          Connect to a remote host
-  connect <id>            Connect to a saved host by ID
-  ssh user@host:port      Connect using SSH-like syntax
-  Or describe in natural language, e.g., "connect to server 192.168.1.100 as root"
-  Note: If you have logged in before with SSH key, no password will be required.
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("Connection:"))
+	fmt.Printf("  %s          %s\n", a.theme.FormatCommand("connect <host>"), a.theme.FormatDescription("Connect to a remote host"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("connect <id>"), a.theme.FormatDescription("Connect to a saved host by ID"))
+	fmt.Printf("  %s      %s\n", a.theme.FormatCommand("ssh user@host:port"), a.theme.FormatDescription("Connect using SSH-like syntax"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("Or describe in natural language, e.g., \"connect to server 192.168.1.100 as root\""))
+	fmt.Printf("  %s\n", a.theme.FormatInfo("Note: If you have logged in before with SSH key, no password will be required."))
 
-Hosts:
-  hosts                   Show all saved hosts with IDs
-  Or use natural language, e.g., "show my hosts" or "显示主机"
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("Hosts:"))
+	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("Show all saved hosts with IDs"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show my hosts\" or \"显示主机\""))
 
-History:
-  history                 Show all login history
-  history <query>         Search history by host, user, or pattern
-  Or use natural language, e.g., "show my login history"
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("History:"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("history"), a.theme.FormatDescription("Show all login history"))
+	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("history <query>"), a.theme.FormatDescription("Search history by host, user, or pattern"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show my login history\""))
 
-Commands (local or remote):
-  $<command>              Execute a command directly, e.g., $ls -la
-  Or describe in natural language, e.g., "show me disk usage"
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("Commands (local or remote):"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("Execute a command directly, e.g., $ls -la"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("Or describe in natural language, e.g., \"show me disk usage\""))
 
-Note: When not connected to a remote host, commands are executed locally.
-`)
+	fmt.Println()
+	fmt.Printf("%s\n", a.theme.FormatInfo("Note: When not connected to a remote host, commands are executed locally."))
 }
