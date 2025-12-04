@@ -134,3 +134,36 @@ func TestNewClientWithPassword(t *testing.T) {
 		t.Error("Client should not be connected immediately after creation")
 	}
 }
+
+func TestIsValidTermType(t *testing.T) {
+	tests := []struct {
+		name     string
+		term     string
+		expected bool
+	}{
+		{"valid xterm", "xterm", true},
+		{"valid xterm-256color", "xterm-256color", true},
+		{"valid screen", "screen", true},
+		{"valid linux", "linux", true},
+		{"valid vt100", "vt100", true},
+		{"valid with underscore", "xterm_256color", true},
+		{"empty string", "", false},
+		{"contains semicolon", "xterm;ls", false},
+		{"contains backtick", "xterm`ls`", false},
+		{"contains dollar", "xterm$HOME", false},
+		{"contains space", "xterm 256color", false},
+		{"contains single quote", "xterm'ls'", false},
+		{"contains double quote", "xterm\"ls\"", false},
+		{"contains pipe", "xterm|ls", false},
+		{"contains ampersand", "xterm&ls", false},
+		{"contains newline", "xterm\nls", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidTermType(tt.term); got != tt.expected {
+				t.Errorf("isValidTermType(%q) = %v, want %v", tt.term, got, tt.expected)
+			}
+		})
+	}
+}
