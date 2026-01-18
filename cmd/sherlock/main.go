@@ -97,7 +97,7 @@ func main() {
 	flag.BoolVar(&showVersion, "v", false, "Show version information (shorthand)")
 	flag.BoolVar(&showHelp, "help", false, "Show help information")
 	flag.BoolVar(&showHelp, "h", false, "Show help information (shorthand)")
-	flag.StringVar(&providerFlag, "provider", "", "LLM provider (ollama, openai, deepseek)")
+	flag.StringVar(&providerFlag, "provider", "", "LLM provider (ollama, openai, deepseek, openai_compatible)")
 	flag.StringVar(&modelFlag, "model", "", "Model name")
 	flag.StringVar(&baseURLFlag, "base-url", "", "Base URL for LLM API")
 	flag.StringVar(&apiKeyFlag, "api-key", "", "API key for LLM provider")
@@ -463,21 +463,40 @@ func (a *App) handleDirectCommand(cmd string) error {
 }
 
 func (a *App) handleCommandRequest(input string) error {
+	// Check if it's a direct shell command (in whitelist)
+	isDirectCommand := a.agent.IsShellCommand(input)
+
+	// Show "thinking..." only when using LLM (not in whitelist)
+	if !isDirectCommand {
+		fmt.Print(a.theme.FormatInfo("Thinking..."))
+	}
+
 	// Parse command using AI
 	cmdInfo, err := a.agent.ParseCommandRequest(a.ctx, input)
 	if err != nil {
+		if !isDirectCommand {
+			fmt.Println() // Clear the "thinking..." line
+		}
 		return fmt.Errorf("failed to parse command request: %w", err)
 	}
 
-	fmt.Printf("%s\n", a.theme.FormatTableHeader("Commands to execute:"))
-	for i, cmd := range cmdInfo.Commands {
-		fmt.Printf("  %d. %s\n", i+1, a.theme.FormatCommand(cmd))
+	// Clear "thinking..." and show generated command when using LLM
+	if !isDirectCommand {
+		fmt.Print("\r\033[K") // Clear the line
+		for _, cmd := range cmdInfo.Commands {
+			fmt.Printf("%s %s\n", a.theme.FormatInfo(">"), a.theme.FormatCommand(cmd))
+		}
 	}
-	fmt.Printf("%s %s\n", a.theme.FormatInfo("Description:"), a.theme.FormatDescription(cmdInfo.Description))
 
-	// Confirm if needed
+	// Confirm if needed (show commands for dangerous operations)
 	if cmdInfo.NeedsConfirm {
-		fmt.Print("\n" + a.theme.FormatWarning("⚠️  This operation may be dangerous. Continue? [y/N]: "))
+		if isDirectCommand {
+			// For direct commands, show the command before confirmation
+			for _, cmd := range cmdInfo.Commands {
+				fmt.Printf("%s %s\n", a.theme.FormatInfo(">"), a.theme.FormatCommand(cmd))
+			}
+		}
+		fmt.Print(a.theme.FormatWarning("⚠️  This operation may be dangerous. Continue? [y/N]: "))
 		reader := bufio.NewReader(os.Stdin)
 		confirm, _ := reader.ReadString('\n')
 		confirm = strings.TrimSpace(strings.ToLower(confirm))
@@ -487,9 +506,8 @@ func (a *App) handleCommandRequest(input string) error {
 		}
 	}
 
-	// Execute commands
+	// Execute commands (no output for direct commands)
 	for _, cmd := range cmdInfo.Commands {
-		fmt.Printf("\n%s %s\n", a.theme.FormatInfo("$"), a.theme.FormatCommand(cmd))
 		if err := a.executeCommand(cmd); err != nil {
 			return err
 		}
@@ -964,7 +982,7 @@ Options:
   -c, --config <path>     Path to configuration file
   -v, --version           Show version information
   -h, --help              Show this help message
-  --provider <provider>   LLM provider (ollama, openai, deepseek)
+  --provider <provider>   LLM provider (ollama, openai, deepseek, openai_compatible)
   --model <model>         Model name
   --base-url <url>        Base URL for LLM API
   --api-key <key>         API key for LLM provider

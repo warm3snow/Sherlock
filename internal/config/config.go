@@ -71,6 +71,8 @@ const (
 	ProviderOpenAI LLMProviderType = "openai"
 	// ProviderDeepSeek represents DeepSeek API.
 	ProviderDeepSeek LLMProviderType = "deepseek"
+	// ProviderOpenAICompatible represents any OpenAI-compatible API (Claude, Qwen, Moonshot, etc.).
+	ProviderOpenAICompatible LLMProviderType = "openai_compatible"
 )
 
 // LLMConfig holds LLM provider configuration.
@@ -181,7 +183,7 @@ func (c *Config) Validate() error {
 		return errors.New("LLM model is required")
 	}
 	switch c.LLM.Provider {
-	case ProviderOpenAI, ProviderDeepSeek:
+	case ProviderOpenAI, ProviderDeepSeek, ProviderOpenAICompatible:
 		if c.LLM.APIKey == "" {
 			return fmt.Errorf("API key is required for provider %s", c.LLM.Provider)
 		}

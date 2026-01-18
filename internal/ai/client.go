@@ -50,7 +50,8 @@ func NewClient(ctx context.Context, cfg *config.LLMConfig) (ModelClient, error) 
 	switch cfg.Provider {
 	case config.ProviderOllama:
 		return newOllamaClient(ctx, cfg)
-	case config.ProviderOpenAI:
+	case config.ProviderOpenAI, config.ProviderOpenAICompatible:
+		// OpenAI Compatible provider reuses the OpenAI client implementation
 		return newOpenAIClient(ctx, cfg)
 	case config.ProviderDeepSeek:
 		return newDeepSeekClient(ctx, cfg)
