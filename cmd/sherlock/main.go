@@ -31,10 +31,14 @@ import (
 	"syscall"
 
 	"github.com/peterh/liner"
+	"golang.org/x/term"
 
 	"github.com/warm3snow/sherlock/internal/agent"
 	"github.com/warm3snow/sherlock/internal/ai"
+	"github.com/warm3snow/sherlock/internal/cache"
 	"github.com/warm3snow/sherlock/internal/config"
+	"github.com/warm3snow/sherlock/internal/crypto"
+	"github.com/warm3snow/sherlock/internal/database"
 	"github.com/warm3snow/sherlock/internal/history"
 	"github.com/warm3snow/sherlock/internal/theme"
 	"github.com/warm3snow/sherlock/pkg/sshclient"
@@ -63,6 +67,9 @@ type App struct {
 	agent          *agent.Agent
 	sshClient      *sshclient.Client
 	historyManager *history.Manager
+	dbManager      *database.Manager
+	cacheManager   *cache.Manager
+	encryptor      *crypto.Encryptor
 	localClient    *sshclient.LocalClient
 	theme          *theme.Theme
 	ctx            context.Context
@@ -204,6 +211,32 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize history manager: %v\n", err)
 	}
 	app.historyManager = historyMgr
+
+	// Initialize encryptor for password encryption
+	encryptor, err := crypto.NewEncryptor("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize encryptor: %v\n", err)
+	}
+	app.encryptor = encryptor
+
+	// Initialize database manager
+	if historyMgr != nil {
+		dbMgr, err := database.NewManager(historyMgr.DB())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to initialize database manager: %v\n", err)
+		}
+		app.dbManager = dbMgr
+	}
+
+	// Initialize cache manager
+	if historyMgr != nil {
+		cacheMgr, err := cache.NewManager(historyMgr.DB())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to initialize cache manager: %v\n", err)
+		}
+		app.cacheManager = cacheMgr
+	}
+
 	// Initialize local client for local command execution
 	app.localClient = sshclient.NewLocalClient()
 
@@ -286,8 +319,11 @@ func (a *App) handleInput(input string) error {
 		return nil
 	case "history":
 		return a.showHistory("")
-	case "hosts":
-		return a.showHosts()
+	}
+
+	// Try enhanced commands first
+	if handled, err := a.handleEnhancedCommand(input); handled {
+		return err
 	}
 
 	// Check for history command with search query
@@ -339,15 +375,123 @@ func (a *App) handleConnect(input string) error {
 		}
 	}
 
-	// Parse connection request using AI
-	fmt.Println(a.theme.FormatInfo("Parsing connection request..."))
+	// Use smart connection parsing to determine connection type
+	fmt.Println(a.theme.FormatInfo("Analyzing connection request..."))
 
-	connInfo, err := a.agent.ParseConnectionRequest(a.ctx, input)
+	connInfo, err := a.agent.ParseSmartConnectionRequest(a.ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to parse connection request: %w", err)
 	}
 
-	return a.connectToHost(connInfo.Host, connInfo.Port, connInfo.User)
+	// Route to appropriate handler based on connection type
+	switch connInfo.Type {
+	case agent.ConnectionTypeSSH:
+		return a.connectToHost(connInfo.Host, connInfo.Port, connInfo.User)
+	case agent.ConnectionTypeDatabase:
+		return a.connectToDatabase(connInfo)
+	case agent.ConnectionTypeCache:
+		return a.connectToCache(connInfo)
+	default:
+		// Default to SSH connection
+		return a.connectToHost(connInfo.Host, connInfo.Port, connInfo.User)
+	}
+}
+
+// connectToDatabase connects to a MySQL database.
+func (a *App) connectToDatabase(connInfo *agent.SmartConnectionInfo) error {
+	fmt.Printf("%s %s@%s:%d...\n", a.theme.FormatInfo("Connecting to MySQL database"), connInfo.User, connInfo.Host, connInfo.Port)
+
+	// Get password if not provided
+	password := connInfo.Password
+	if password == "" {
+		fmt.Print("Enter password: ")
+		pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		password = string(pwBytes)
+	}
+
+	// Create database connection
+	conn := &database.Connection{
+		Host:         connInfo.Host,
+		Port:         connInfo.Port,
+		User:         connInfo.User,
+		DatabaseName: connInfo.DatabaseName,
+	}
+
+	client, err := database.NewClient(conn, password)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	fmt.Println(a.theme.FormatSuccess("Successfully connected to MySQL database"))
+
+	// Record connection if manager is available
+	if a.dbManager != nil {
+		encryptedPwd := ""
+		if a.encryptor != nil && password != "" {
+			encryptedPwd, _ = a.encryptor.Encrypt(password)
+		}
+		conn.Password = encryptedPwd
+		_, _ = a.dbManager.RecordLogin(a.ctx, conn)
+	}
+
+	// Start interactive shell
+	shell := database.NewShell(client, a.dbManager, conn)
+	return shell.Run(a.ctx)
+}
+
+// connectToCache connects to a Redis cache.
+func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
+	fmt.Printf("%s %s:%d...\n", a.theme.FormatInfo("Connecting to Redis cache"), connInfo.Host, connInfo.Port)
+
+	// Get password if auth is required but not provided
+	password := connInfo.Password
+
+	// Create cache connection
+	conn := &cache.Connection{
+		Host:          connInfo.Host,
+		Port:          connInfo.Port,
+		DatabaseIndex: 0,
+	}
+
+	client, err := cache.NewClient(conn, password)
+	if err != nil {
+		// If connection failed, might need password
+		if password == "" && strings.Contains(err.Error(), "NOAUTH") {
+			fmt.Print("Enter password: ")
+			pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				return fmt.Errorf("failed to read password: %w", err)
+			}
+			password = string(pwBytes)
+			client, err = cache.NewClient(conn, password)
+			if err != nil {
+				return fmt.Errorf("failed to connect to cache: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to connect to cache: %w", err)
+		}
+	}
+
+	fmt.Println(a.theme.FormatSuccess("Successfully connected to Redis cache"))
+
+	// Record connection if manager is available
+	if a.cacheManager != nil {
+		encryptedPwd := ""
+		if a.encryptor != nil && password != "" {
+			encryptedPwd, _ = a.encryptor.Encrypt(password)
+		}
+		conn.Password = encryptedPwd
+		_, _ = a.cacheManager.RecordLogin(a.ctx, conn)
+	}
+
+	// Start interactive shell
+	shell := cache.NewShell(client, a.cacheManager, conn)
+	return shell.Run(a.ctx)
 }
 
 func (a *App) connectToHost(host string, port int, user string) error {
@@ -999,39 +1143,53 @@ For more information, visit: https://github.com/warm3snow/Sherlock
 
 func (a *App) printCommandHelp() {
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Available commands:"))
-	fmt.Printf("  %s                    %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help message"))
-	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("exit, quit, q"), a.theme.FormatDescription("Exit Sherlock"))
-	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show current status"))
-	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("Show all saved hosts"))
-	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("history"), a.theme.FormatDescription("Show login history"))
-	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("history <query>"), a.theme.FormatDescription("Search login history"))
-	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("disconnect"), a.theme.FormatDescription("Disconnect from remote host (switch to local mode)"))
+	fmt.Println(a.theme.FormatTableHeader("General:"))
+	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("exit, quit"), a.theme.FormatDescription("Exit Sherlock"))
+	fmt.Printf("  %s                      %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show status"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Connection:"))
-	fmt.Printf("  %s          %s\n", a.theme.FormatCommand("connect <host>"), a.theme.FormatDescription("Connect to a remote host"))
-	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("connect <id>"), a.theme.FormatDescription("Connect to a saved host by ID"))
-	fmt.Printf("  %s      %s\n", a.theme.FormatCommand("ssh user@host:port"), a.theme.FormatDescription("Connect using SSH-like syntax"))
-	fmt.Printf("  %s\n", a.theme.FormatDescription("Or describe in natural language, e.g., \"connect to server 192.168.1.100 as root\""))
-	fmt.Printf("  %s\n", a.theme.FormatInfo("Note: If you have logged in before with SSH key, no password will be required."))
+	fmt.Println(a.theme.FormatTableHeader("SSH Hosts:"))
+	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("List hosts"))
+	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("hosts add <spec>"), a.theme.FormatDescription("Add host (user@host:port)"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("hosts show|delete <id>"), a.theme.FormatDescription("Show/delete host"))
+	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("hosts group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("connect <id|alias>"), a.theme.FormatDescription("Connect to host"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Hosts:"))
-	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("Show all saved hosts with IDs"))
-	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show my hosts\" or \"显示主机\""))
+	fmt.Println(a.theme.FormatTableHeader("Database (MySQL):"))
+	fmt.Printf("  %s                          %s\n", a.theme.FormatCommand("db"), a.theme.FormatDescription("List connections"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("db add <spec>"), a.theme.FormatDescription("Add (user@host:port/dbname)"))
+	fmt.Printf("  %s        %s\n", a.theme.FormatCommand("db show|delete <id>"), a.theme.FormatDescription("Show/delete connection"))
+	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("db connect <id>"), a.theme.FormatDescription("Enter interactive shell"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("db exec <id> <sql>"), a.theme.FormatDescription("Execute SQL query"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("db group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("History:"))
-	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("history"), a.theme.FormatDescription("Show all login history"))
-	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("history <query>"), a.theme.FormatDescription("Search history by host, user, or pattern"))
-	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show my login history\""))
+	fmt.Println(a.theme.FormatTableHeader("Cache (Redis):"))
+	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("cache"), a.theme.FormatDescription("List connections"))
+	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("cache add <spec>"), a.theme.FormatDescription("Add (host:port)"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("cache show|delete <id>"), a.theme.FormatDescription("Show/delete connection"))
+	fmt.Printf("  %s        %s\n", a.theme.FormatCommand("cache connect <id>"), a.theme.FormatDescription("Enter interactive shell"))
+	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("cache exec <id> <cmd>"), a.theme.FormatDescription("Execute Redis command"))
+	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("cache group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Commands (local or remote):"))
-	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("Execute a command directly, e.g., $ls -la"))
-	fmt.Printf("  %s\n", a.theme.FormatDescription("Or describe in natural language, e.g., \"show me disk usage\""))
+	fmt.Println(a.theme.FormatTableHeader("Batch & Transfer:"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("batch <cmd> --group=<g>"), a.theme.FormatDescription("Execute on group"))
+	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("upload <local> <remote>"), a.theme.FormatDescription("Upload file"))
+	fmt.Printf("  %s %s\n", a.theme.FormatCommand("download <remote> <local>"), a.theme.FormatDescription("Download file"))
 
 	fmt.Println()
-	fmt.Printf("%s\n", a.theme.FormatInfo("Note: When not connected to a remote host, commands are executed locally."))
+	fmt.Println(a.theme.FormatTableHeader("Monitoring:"))
+	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("check"), a.theme.FormatDescription("Check hosts connectivity"))
+	fmt.Printf("  %s             %s\n", a.theme.FormatCommand("monitor <host>"), a.theme.FormatDescription("Show resource metrics"))
+
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("Commands:"))
+	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("Execute command directly"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show disk usage\""))
+
+	fmt.Println()
+	fmt.Printf("%s\n", a.theme.FormatInfo("Use '<cmd> help' for detailed usage of each command."))
 }

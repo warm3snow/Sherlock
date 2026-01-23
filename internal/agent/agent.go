@@ -86,6 +86,44 @@ Examples:
 - "连接到192.168.1.100用户admin" -> {"host": "192.168.1.100", "port": 22, "user": "admin"}
 - "登录服务器10.0.0.1端口2222用户admin" -> {"host": "10.0.0.1", "port": 2222, "user": "admin"}`
 
+const systemPromptSmartConnection = `You are Sherlock, an AI assistant for remote connection management.
+Your task is to analyze user input and determine the connection type: SSH, MySQL database, or Redis cache.
+
+Analyze the input and determine:
+1. type: "ssh", "database", or "cache"
+2. connection details based on the type
+
+Key indicators for each type:
+- SSH: keywords like "ssh", "connect", "server", "主机", common SSH ports (22, 2222)
+- Database (MySQL): keywords like "mysql", "database", "db", "数据库", flags like "-u", "-p", "-P", common MySQL ports (3306, 30505, 33060)
+- Cache (Redis): keywords like "redis", "cache", "缓存", common Redis ports (6379, 16379, 26379)
+
+IMPORTANT port hints:
+- Port 22, 2222: Usually SSH
+- Port 3306, 33060, 30505: Usually MySQL database
+- Port 6379, 16379, 26379: Usually Redis cache
+- If the command looks like "mysql -h host -P port -u user -p password" format, it's a database connection
+
+Respond in JSON format only:
+{
+  "type": "ssh|database|cache",
+  "host": "hostname or IP",
+  "port": number,
+  "user": "username (for ssh/database)",
+  "password": "password if provided",
+  "database_name": "database name (for database type)"
+}
+
+Examples:
+- "connect to 192.168.1.1" -> {"type": "ssh", "host": "192.168.1.1", "port": 22, "user": "root"}
+- "ssh root@192.168.1.1:2222" -> {"type": "ssh", "host": "192.168.1.1", "port": 2222, "user": "root"}
+- "mysql -h 192.168.1.1 -P3306 -uroot -ppassword" -> {"type": "database", "host": "192.168.1.1", "port": 3306, "user": "root", "password": "password"}
+- "登录 mysql 数据库 192.168.1.1 -P30505 -uroot -proot123" -> {"type": "database", "host": "192.168.1.1", "port": 30505, "user": "root", "password": "root123"}
+- "连接数据库 root@192.168.1.1:3306/testdb" -> {"type": "database", "host": "192.168.1.1", "port": 3306, "user": "root", "database_name": "testdb"}
+- "redis-cli -h 192.168.1.1 -p 6379" -> {"type": "cache", "host": "192.168.1.1", "port": 6379}
+- "连接 redis 192.168.1.1:6379" -> {"type": "cache", "host": "192.168.1.1", "port": 6379}
+- "登录缓存 192.168.1.1" -> {"type": "cache", "host": "192.168.1.1", "port": 6379}`
+
 const systemPromptCommand = `You are Sherlock, an AI assistant for SSH remote operations.
 Your task is to translate natural language requests into shell commands.
 
@@ -110,12 +148,33 @@ Examples:
 - "remove the tmp folder" -> {"commands": ["rm -rf tmp"], "description": "Recursively remove the tmp directory and its contents", "needs_confirm": true}
 - "restart nginx service" -> {"commands": ["sudo systemctl restart nginx"], "description": "Restart the nginx service", "needs_confirm": true}`
 
+// ConnectionType represents the type of connection (SSH, Database, Cache).
+type ConnectionType string
+
+const (
+	ConnectionTypeSSH      ConnectionType = "ssh"
+	ConnectionTypeDatabase ConnectionType = "database"
+	ConnectionTypeCache    ConnectionType = "cache"
+	ConnectionTypeUnknown  ConnectionType = "unknown"
+)
+
 // ConnectionInfo represents parsed connection information.
 type ConnectionInfo struct {
 	Host  string `json:"host"`
 	Port  int    `json:"port"`
 	User  string `json:"user"`
 	Error string `json:"error,omitempty"`
+}
+
+// SmartConnectionInfo represents parsed connection information with type detection.
+type SmartConnectionInfo struct {
+	Type         ConnectionType `json:"type"`
+	Host         string         `json:"host"`
+	Port         int            `json:"port"`
+	User         string         `json:"user,omitempty"`
+	Password     string         `json:"password,omitempty"`
+	DatabaseName string         `json:"database_name,omitempty"`
+	Error        string         `json:"error,omitempty"`
 }
 
 // CommandInfo represents parsed command information.
@@ -430,4 +489,263 @@ func (c *ConnectionInfo) ToHostInfo() *sshclient.HostInfo {
 		Port: c.Port,
 		User: c.User,
 	}
+}
+
+// parseSmartConnectionDirect tries to parse connection patterns directly without LLM.
+func parseSmartConnectionDirect(request string) *SmartConnectionInfo {
+	lower := strings.ToLower(request)
+
+	// Detect connection type from keywords
+	isDatabase := strings.Contains(lower, "mysql") || strings.Contains(lower, "数据库") ||
+		strings.Contains(lower, "database") || strings.Contains(lower, "db ")
+	isCache := strings.Contains(lower, "redis") || strings.Contains(lower, "缓存") ||
+		strings.Contains(lower, "cache")
+
+	// Parse MySQL command line format: mysql -h host -P port -u user -p password
+	if isDatabase || strings.Contains(request, "-P") {
+		info := parseMySQLFormat(request)
+		if info != nil {
+			return info
+		}
+	}
+
+	// Parse Redis command line format: redis-cli -h host -p port
+	if isCache {
+		info := parseRedisFormat(request)
+		if info != nil {
+			return info
+		}
+	}
+
+	// Parse database connection string: user@host:port/dbname
+	if isDatabase {
+		info := parseDatabaseConnString(request)
+		if info != nil {
+			return info
+		}
+	}
+
+	// Parse cache connection string: host:port
+	if isCache {
+		info := parseCacheConnString(request)
+		if info != nil {
+			return info
+		}
+	}
+
+	return nil
+}
+
+// parseMySQLFormat parses MySQL command line format.
+func parseMySQLFormat(request string) *SmartConnectionInfo {
+	info := &SmartConnectionInfo{
+		Type: ConnectionTypeDatabase,
+		Port: 3306,
+		User: "root",
+	}
+
+	// Extract host: -h host or -hhost
+	hostRe := regexp.MustCompile(`-h\s*([a-zA-Z0-9.-]+)`)
+	if matches := hostRe.FindStringSubmatch(request); len(matches) == 2 {
+		info.Host = matches[1]
+	}
+
+	// Extract port: -P port or -Pport
+	portRe := regexp.MustCompile(`-P\s*(\d+)`)
+	if matches := portRe.FindStringSubmatch(request); len(matches) == 2 {
+		if port, err := strconv.Atoi(matches[1]); err == nil {
+			info.Port = port
+		}
+	}
+
+	// Extract user: -u user or -uuser
+	userRe := regexp.MustCompile(`-u\s*([a-zA-Z0-9_-]+)`)
+	if matches := userRe.FindStringSubmatch(request); len(matches) == 2 {
+		info.User = matches[1]
+	}
+
+	// Extract password: -p password or -ppassword (but not just -p)
+	passRe := regexp.MustCompile(`-p([a-zA-Z0-9_!@#$%^&*()-]+)`)
+	if matches := passRe.FindStringSubmatch(request); len(matches) == 2 {
+		info.Password = matches[1]
+	}
+
+	// If no host found via -h, try to find IP address directly
+	if info.Host == "" {
+		ipPattern := regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+		if matches := ipPattern.FindStringSubmatch(request); len(matches) == 2 {
+			if net.ParseIP(matches[1]) != nil {
+				info.Host = matches[1]
+			}
+		}
+	}
+
+	if info.Host == "" {
+		return nil
+	}
+
+	return info
+}
+
+// parseRedisFormat parses Redis command line format.
+func parseRedisFormat(request string) *SmartConnectionInfo {
+	info := &SmartConnectionInfo{
+		Type: ConnectionTypeCache,
+		Port: 6379,
+	}
+
+	// Extract host: -h host
+	hostRe := regexp.MustCompile(`-h\s*([a-zA-Z0-9.-]+)`)
+	if matches := hostRe.FindStringSubmatch(request); len(matches) == 2 {
+		info.Host = matches[1]
+	}
+
+	// Extract port: -p port (lowercase p for redis)
+	portRe := regexp.MustCompile(`-p\s*(\d+)`)
+	if matches := portRe.FindStringSubmatch(request); len(matches) == 2 {
+		if port, err := strconv.Atoi(matches[1]); err == nil {
+			info.Port = port
+		}
+	}
+
+	// Extract password: -a password
+	passRe := regexp.MustCompile(`-a\s*([a-zA-Z0-9_!@#$%^&*()-]+)`)
+	if matches := passRe.FindStringSubmatch(request); len(matches) == 2 {
+		info.Password = matches[1]
+	}
+
+	// If no host found, try IP address
+	if info.Host == "" {
+		ipPattern := regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+		if matches := ipPattern.FindStringSubmatch(request); len(matches) == 2 {
+			if net.ParseIP(matches[1]) != nil {
+				info.Host = matches[1]
+			}
+		}
+	}
+
+	if info.Host == "" {
+		return nil
+	}
+
+	return info
+}
+
+// parseDatabaseConnString parses database connection string format: user@host:port/dbname
+func parseDatabaseConnString(request string) *SmartConnectionInfo {
+	// Pattern: user@host:port/dbname or user@host/dbname or host:port/dbname
+	re := regexp.MustCompile(`([a-zA-Z0-9_-]+)?@?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9.-]+):?(\d+)?/?([a-zA-Z0-9_-]+)?`)
+	matches := re.FindStringSubmatch(request)
+	if len(matches) < 3 {
+		return nil
+	}
+
+	info := &SmartConnectionInfo{
+		Type: ConnectionTypeDatabase,
+		Port: 3306,
+		User: "root",
+	}
+
+	if matches[1] != "" {
+		info.User = matches[1]
+	}
+	info.Host = matches[2]
+	if matches[3] != "" {
+		if port, err := strconv.Atoi(matches[3]); err == nil {
+			info.Port = port
+		}
+	}
+	if len(matches) > 4 && matches[4] != "" {
+		info.DatabaseName = matches[4]
+	}
+
+	// Validate host is an IP or hostname
+	if net.ParseIP(info.Host) == nil && !strings.Contains(info.Host, ".") {
+		return nil
+	}
+
+	return info
+}
+
+// parseCacheConnString parses cache connection string format: host:port
+func parseCacheConnString(request string) *SmartConnectionInfo {
+	// Pattern: host:port
+	re := regexp.MustCompile(`(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9.-]+):(\d+)`)
+	matches := re.FindStringSubmatch(request)
+
+	info := &SmartConnectionInfo{
+		Type: ConnectionTypeCache,
+		Port: 6379,
+	}
+
+	if len(matches) == 3 {
+		info.Host = matches[1]
+		if port, err := strconv.Atoi(matches[2]); err == nil {
+			info.Port = port
+		}
+	} else {
+		// Try just IP address
+		ipPattern := regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+		if ipMatches := ipPattern.FindStringSubmatch(request); len(ipMatches) == 2 {
+			if net.ParseIP(ipMatches[1]) != nil {
+				info.Host = ipMatches[1]
+			}
+		}
+	}
+
+	if info.Host == "" {
+		return nil
+	}
+
+	return info
+}
+
+// ParseSmartConnectionRequest analyzes user input and determines the connection type.
+func (a *Agent) ParseSmartConnectionRequest(ctx context.Context, request string) (*SmartConnectionInfo, error) {
+	// First try to parse common patterns directly
+	if info := parseSmartConnectionDirect(request); info != nil {
+		return info, nil
+	}
+
+	// Fall back to AI parsing
+	messages := []*schema.Message{
+		schema.SystemMessage(systemPromptSmartConnection),
+		schema.UserMessage(request),
+	}
+
+	response, err := a.aiClient.Generate(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	content := strings.TrimSpace(response.Content)
+	content = extractJSON(content)
+
+	var info SmartConnectionInfo
+	if err := json.Unmarshal([]byte(content), &info); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if info.Error != "" {
+		return nil, fmt.Errorf("connection parse error: %s", info.Error)
+	}
+
+	// Set default ports based on type
+	if info.Port == 0 {
+		switch info.Type {
+		case ConnectionTypeSSH:
+			info.Port = 22
+		case ConnectionTypeDatabase:
+			info.Port = 3306
+		case ConnectionTypeCache:
+			info.Port = 6379
+		}
+	}
+
+	// Set default user for SSH
+	if info.Type == ConnectionTypeSSH && info.User == "" {
+		info.User = "root"
+	}
+
+	return &info, nil
 }

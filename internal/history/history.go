@@ -110,6 +110,13 @@ func (m *Manager) initDB() error {
 	}
 
 	m.db = db
+
+	// Run migrations
+	if err := m.RunMigrations(); err != nil {
+		// Log but don't fail - migrations may have already been applied
+		// or the tables may already exist
+	}
+
 	return nil
 }
 
@@ -119,6 +126,11 @@ func (m *Manager) Close() error {
 		return m.db.Close()
 	}
 	return nil
+}
+
+// DB returns the underlying database connection.
+func (m *Manager) DB() *sql.DB {
+	return m.db
 }
 
 // AddRecord adds or updates a login record.
