@@ -122,6 +122,13 @@ func (s *Shell) Run(ctx context.Context) error {
 
 		s.liner.AppendHistory(query)
 
+		// Check for exit command - return to sherlock main loop
+		lowerQuery := strings.ToLower(query)
+		if lowerQuery == "exit" || lowerQuery == "quit" || lowerQuery == "\\q" {
+			fmt.Fprintln(s.out, "Bye")
+			return nil
+		}
+
 		// Handle special commands
 		if s.handleSpecialCommand(ctx, query) {
 			continue
@@ -161,8 +168,7 @@ func (s *Shell) handleSpecialCommand(ctx context.Context, input string) bool {
 
 	switch cmd {
 	case "exit", "quit", "\\q":
-		fmt.Fprintln(s.out, "Bye")
-		os.Exit(0)
+		// Handled in Run() loop - should not reach here
 		return true
 
 	case "help", "\\h":

@@ -21,45 +21,27 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/warm3snow/sherlock/internal/crypto"
 	"gopkg.in/yaml.v3"
 )
 
 // Manager manages database connections.
 type Manager struct {
-	db        *sql.DB
-	encryptor *crypto.Encryptor
+	db *sql.DB
 }
 
 // NewManager creates a new database connection manager.
 func NewManager(db *sql.DB) (*Manager, error) {
-	encryptor, err := crypto.DefaultEncryptor()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create encryptor: %w", err)
-	}
-
 	return &Manager{
-		db:        db,
-		encryptor: encryptor,
+		db: db,
 	}, nil
 }
 
 // AddConnection adds a new database connection.
 func (m *Manager) AddConnection(ctx context.Context, conn *Connection) error {
-	// Encrypt password if provided
-	encryptedPwd := ""
-	if conn.Password != "" {
-		var err error
-		encryptedPwd, err = m.encryptor.Encrypt(conn.Password)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt password: %w", err)
-		}
-	}
-
 	result, err := m.db.ExecContext(ctx, `
 		INSERT INTO database_connections (host, port, user, password, database_name, alias, description, timestamp, login_count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-	`, conn.Host, conn.Port, conn.User, encryptedPwd, conn.DatabaseName, conn.Alias, conn.Description, time.Now())
+	`, conn.Host, conn.Port, conn.User, conn.Password, conn.DatabaseName, conn.Alias, conn.Description, time.Now())
 	if err != nil {
 		return fmt.Errorf("failed to add connection: %w", err)
 	}
@@ -75,21 +57,11 @@ func (m *Manager) AddConnection(ctx context.Context, conn *Connection) error {
 
 // UpdateConnection updates an existing database connection.
 func (m *Manager) UpdateConnection(ctx context.Context, conn *Connection) error {
-	// Encrypt password if provided
-	encryptedPwd := ""
-	if conn.Password != "" {
-		var err error
-		encryptedPwd, err = m.encryptor.Encrypt(conn.Password)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt password: %w", err)
-		}
-	}
-
 	_, err := m.db.ExecContext(ctx, `
 		UPDATE database_connections
 		SET host = ?, port = ?, user = ?, password = ?, database_name = ?, alias = ?, description = ?
 		WHERE id = ?
-	`, conn.Host, conn.Port, conn.User, encryptedPwd, conn.DatabaseName, conn.Alias, conn.Description, conn.ID)
+	`, conn.Host, conn.Port, conn.User, conn.Password, conn.DatabaseName, conn.Alias, conn.Description, conn.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update connection: %w", err)
 	}
@@ -292,12 +264,9 @@ func (m *Manager) IncrementLoginCount(ctx context.Context, id int64) error {
 	return err
 }
 
-// DecryptPassword decrypts the password for a connection.
-func (m *Manager) DecryptPassword(encryptedPassword string) (string, error) {
-	if encryptedPassword == "" {
-		return "", nil
-	}
-	return m.encryptor.Decrypt(encryptedPassword)
+// DecryptPassword returns the password directly (no encryption).
+func (m *Manager) DecryptPassword(password string) (string, error) {
+	return password, nil
 }
 
 // AddQueryHistory adds a query to the history.

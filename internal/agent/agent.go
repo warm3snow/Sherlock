@@ -749,3 +749,163 @@ func (a *Agent) ParseSmartConnectionRequest(ctx context.Context, request string)
 
 	return &info, nil
 }
+
+// SherlockCommandInfo represents parsed sherlock internal command.
+type SherlockCommandInfo struct {
+	Command string   `json:"command"` // The sherlock command: host, db, cache, connect, etc.
+	Action  string   `json:"action"`  // The action: list, add, delete, show, connect, etc.
+	Args    []string `json:"args"`    // Additional arguments
+	Error   string   `json:"error,omitempty"`
+}
+
+const systemPromptSherlockCommand = `You are Sherlock, an AI assistant for remote connection management.
+Your task is to parse natural language requests into Sherlock internal commands.
+
+Available Sherlock commands:
+1. host - Manage SSH hosts (list, add, delete, show, edit, group, tag)
+2. db - Manage MySQL database connections (list, add, delete, show, connect, exec)
+3. cache - Manage Redis cache connections (list, add, delete, show, connect)
+4. connect <id> - Connect to a saved host by ID
+5. batch - Execute commands on multiple hosts
+6. check - Check host connectivity
+7. upload/download - File transfer
+
+Parse the user's natural language input and determine:
+1. command: The main command (host, db, cache, connect, batch, check, upload, download)
+2. action: The specific action (list, add, delete, show, connect, exec, group, tag)
+3. args: Additional arguments as an array
+
+Respond in JSON format only:
+{
+  "command": "host",
+  "action": "list",
+  "args": []
+}
+
+Examples:
+- "show all hosts" -> {"command": "host", "action": "list", "args": []}
+- "list database connections" -> {"command": "db", "action": "list", "args": []}
+- "add host root@192.168.1.1:22" -> {"command": "host", "action": "add", "args": ["root@192.168.1.1:22"]}
+- "delete host 1" -> {"command": "host", "action": "delete", "args": ["1"]}
+- "connect to database 2" -> {"command": "db", "action": "connect", "args": ["2"]}
+- "show redis connections" -> {"command": "cache", "action": "list", "args": []}
+- "查看主机列表" -> {"command": "host", "action": "list", "args": []}
+- "显示数据库连接" -> {"command": "db", "action": "list", "args": []}
+- "添加主机 admin@10.0.0.1" -> {"command": "host", "action": "add", "args": ["admin@10.0.0.1"]}
+- "删除数据库连接 3" -> {"command": "db", "action": "delete", "args": ["3"]}
+- "连接数据库 1" -> {"command": "db", "action": "connect", "args": ["1"]}
+- "查看缓存连接" -> {"command": "cache", "action": "list", "args": []}
+- "检查主机连通性" -> {"command": "check", "action": "", "args": []}
+
+If the input doesn't match any sherlock command, respond with:
+{"error": "not a sherlock command"}`
+
+// ParseSherlockCommandDirect tries to parse common sherlock command patterns directly without LLM.
+func ParseSherlockCommandDirect(request string) *SherlockCommandInfo {
+	lower := strings.ToLower(request)
+
+	// Host commands
+	hostKeywords := []string{"host", "hosts", "主机", "服务器"}
+	dbKeywords := []string{"db", "database", "mysql", "数据库"}
+	cacheKeywords := []string{"cache", "redis", "缓存"}
+	listKeywords := []string{"list", "show", "显示", "查看", "列表", "all"}
+	addKeywords := []string{"add", "添加", "新增"}
+	deleteKeywords := []string{"delete", "remove", "删除", "移除"}
+	connectKeywords := []string{"connect", "连接"}
+	checkKeywords := []string{"check", "检查", "测试"}
+
+	containsAny := func(s string, keywords []string) bool {
+		for _, kw := range keywords {
+			if strings.Contains(s, kw) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Determine command type
+	var command string
+	if containsAny(lower, hostKeywords) {
+		command = "host"
+	} else if containsAny(lower, dbKeywords) {
+		command = "db"
+	} else if containsAny(lower, cacheKeywords) {
+		command = "cache"
+	} else if containsAny(lower, checkKeywords) {
+		return &SherlockCommandInfo{Command: "check", Action: "", Args: []string{}}
+	} else {
+		return nil
+	}
+
+	// Determine action
+	var action string
+	if containsAny(lower, listKeywords) {
+		action = "list"
+	} else if containsAny(lower, addKeywords) {
+		action = "add"
+	} else if containsAny(lower, deleteKeywords) {
+		action = "delete"
+	} else if containsAny(lower, connectKeywords) {
+		action = "connect"
+	} else {
+		action = "list" // default to list
+	}
+
+	// Extract ID or arguments (numbers)
+	var args []string
+	idRe := regexp.MustCompile(`\b(\d+)\b`)
+	if matches := idRe.FindAllStringSubmatch(request, -1); len(matches) > 0 {
+		for _, m := range matches {
+			args = append(args, m[1])
+		}
+	}
+
+	// Extract connection string (user@host:port format)
+	connRe := regexp.MustCompile(`([a-zA-Z0-9_-]+@)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9.-]+)(:\d+)?(/[a-zA-Z0-9_-]+)?`)
+	if matches := connRe.FindStringSubmatch(request); len(matches) > 0 && matches[0] != "" {
+		// Only add if it looks like a connection string (has @ or has host:port)
+		if strings.Contains(matches[0], "@") || strings.Contains(matches[0], ":") {
+			args = append(args, matches[0])
+		}
+	}
+
+	return &SherlockCommandInfo{
+		Command: command,
+		Action:  action,
+		Args:    args,
+	}
+}
+
+// ParseSherlockCommand parses natural language input into sherlock internal commands.
+func (a *Agent) ParseSherlockCommand(ctx context.Context, request string) (*SherlockCommandInfo, error) {
+	// First try direct parsing
+	if info := ParseSherlockCommandDirect(request); info != nil {
+		return info, nil
+	}
+
+	// Fall back to AI parsing
+	messages := []*schema.Message{
+		schema.SystemMessage(systemPromptSherlockCommand),
+		schema.UserMessage(request),
+	}
+
+	response, err := a.aiClient.Generate(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	content := strings.TrimSpace(response.Content)
+	content = extractJSON(content)
+
+	var info SherlockCommandInfo
+	if err := json.Unmarshal([]byte(content), &info); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if info.Error != "" {
+		return nil, fmt.Errorf("not a sherlock command")
+	}
+
+	return &info, nil
+}
+

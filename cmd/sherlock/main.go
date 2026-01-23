@@ -37,7 +37,6 @@ import (
 	"github.com/warm3snow/sherlock/internal/ai"
 	"github.com/warm3snow/sherlock/internal/cache"
 	"github.com/warm3snow/sherlock/internal/config"
-	"github.com/warm3snow/sherlock/internal/crypto"
 	"github.com/warm3snow/sherlock/internal/database"
 	"github.com/warm3snow/sherlock/internal/history"
 	"github.com/warm3snow/sherlock/internal/theme"
@@ -69,7 +68,6 @@ type App struct {
 	historyManager *history.Manager
 	dbManager      *database.Manager
 	cacheManager   *cache.Manager
-	encryptor      *crypto.Encryptor
 	localClient    *sshclient.LocalClient
 	theme          *theme.Theme
 	ctx            context.Context
@@ -82,7 +80,7 @@ func main() {
 	// Check for subcommands first
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "hosts":
+		case "host":
 			handleHostsCommand()
 			return
 		}
@@ -212,13 +210,6 @@ func main() {
 	}
 	app.historyManager = historyMgr
 
-	// Initialize encryptor for password encryption
-	encryptor, err := crypto.NewEncryptor("")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize encryptor: %v\n", err)
-	}
-	app.encryptor = encryptor
-
 	// Initialize database manager
 	if historyMgr != nil {
 		dbMgr, err := database.NewManager(historyMgr.DB())
@@ -262,8 +253,8 @@ func (a *App) run() error {
 	// Set up tab completion
 	a.liner.SetCompleter(a.completer)
 
-	// Enable multiline mode for better UX
-	a.liner.SetCtrlCAborts(true)
+	// Disable Ctrl+C exit - only allow exit via 'exit' command
+	a.liner.SetCtrlCAborts(false)
 
 	for {
 		var hostStr string
@@ -281,7 +272,13 @@ func (a *App) run() error {
 			input, err = a.liner.Prompt(stripANSI(prompt))
 		}
 		if err != nil {
-			if err == liner.ErrPromptAborted || err == io.EOF {
+			if err == liner.ErrPromptAborted {
+				// Ctrl+C pressed, just print a newline and continue
+				fmt.Println()
+				continue
+			}
+			if err == io.EOF {
+				// Only exit on EOF (e.g., when stdin is closed)
 				fmt.Println("\nGoodbye!")
 				return nil
 			}
@@ -357,6 +354,11 @@ func (a *App) handleInput(input string) error {
 		return a.showHosts()
 	}
 
+	// Try to parse as sherlock internal command using natural language
+	if cmdInfo, err := a.agent.ParseSherlockCommand(a.ctx, input); err == nil && cmdInfo != nil {
+		return a.executeSherlockCommand(cmdInfo)
+	}
+
 	// Parse as command request (works both locally and remotely)
 	return a.handleCommandRequest(input)
 }
@@ -430,11 +432,7 @@ func (a *App) connectToDatabase(connInfo *agent.SmartConnectionInfo) error {
 
 	// Record connection if manager is available
 	if a.dbManager != nil {
-		encryptedPwd := ""
-		if a.encryptor != nil && password != "" {
-			encryptedPwd, _ = a.encryptor.Encrypt(password)
-		}
-		conn.Password = encryptedPwd
+		conn.Password = password
 		_, _ = a.dbManager.RecordLogin(a.ctx, conn)
 	}
 
@@ -481,11 +479,7 @@ func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
 
 	// Record connection if manager is available
 	if a.cacheManager != nil {
-		encryptedPwd := ""
-		if a.encryptor != nil && password != "" {
-			encryptedPwd, _ = a.encryptor.Encrypt(password)
-		}
-		conn.Password = encryptedPwd
+		conn.Password = password
 		_, _ = a.cacheManager.RecordLogin(a.ctx, conn)
 	}
 
@@ -783,14 +777,19 @@ func (a *App) completer(line string) []string {
 
 // completeCommands returns completions for shell commands.
 func (a *App) completeCommands(prefix string) []string {
-	// Built-in commands
+	// Built-in commands and shortcuts
 	builtinCommands := []string{
-		"help", "exit", "quit", "disconnect", "status", "history", "hosts", "connect",
+		"help", "exit", "quit", "disconnect", "status", "history", "connect",
+		"list", "ls",                           // Unified list
+		"host", "hl", "ha", "hr", "hc",         // Host commands
+		"db", "dl", "da", "dr", "dc",           // Database commands
+		"cache", "cl", "ca", "cr", "cc",        // Cache commands
+		"batch", "upload", "download", "check", "monitor",
 	}
 
 	// Common shell commands
 	shellCommands := []string{
-		"ls", "cd", "pwd", "mkdir", "rmdir", "rm", "cp", "mv",
+		"pwd", "mkdir", "rmdir", "rm", "cp", "mv",
 		"touch", "cat", "head", "tail", "less", "more", "find", "grep",
 		"ps", "top", "htop", "df", "du", "free", "uname", "hostname",
 		"ping", "curl", "wget", "ssh", "scp", "rsync",
@@ -800,7 +799,7 @@ func (a *App) completeCommands(prefix string) []string {
 
 	allCommands := append(builtinCommands, shellCommands...)
 	var completions []string
-	
+
 	prefix = strings.ToLower(prefix)
 	for _, cmd := range allCommands {
 		if strings.HasPrefix(cmd, prefix) {
@@ -994,7 +993,7 @@ func isHistoryRequest(input string) bool {
 
 func isHostsRequest(input string) bool {
 	lower := strings.ToLower(input)
-	keywords := []string{"hosts", "主机", "服务器", "saved hosts", "show hosts", "list hosts", "查看主机", "显示主机", "all hosts"}
+	keywords := []string{"host", "hosts", "主机", "服务器", "saved hosts", "show hosts", "list hosts", "查看主机", "显示主机", "all hosts"}
 	for _, kw := range keywords {
 		if strings.Contains(lower, kw) {
 			return true
@@ -1120,7 +1119,7 @@ func printHelp() {
 Usage: sherlock [options] [command]
 
 Commands:
-  hosts                   Show all saved hosts
+  host                    Show all saved hosts
 
 Options:
   -c, --config <path>     Path to configuration file
@@ -1133,7 +1132,7 @@ Options:
 
 Examples:
   sherlock                           Start interactive mode with default config
-  sherlock hosts                     Show all saved hosts
+  sherlock host                      Show all saved hosts
   sherlock --provider ollama         Use Ollama as LLM provider
   sherlock -c ~/.config/sherlock/config.json
 
@@ -1147,32 +1146,30 @@ func (a *App) printCommandHelp() {
 	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help"))
 	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("exit, quit"), a.theme.FormatDescription("Exit Sherlock"))
 	fmt.Printf("  %s                      %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show status"))
+	fmt.Printf("  %s                    %s\n", a.theme.FormatCommand("list, ls"), a.theme.FormatDescription("List all connections"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("SSH Hosts:"))
-	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("hosts"), a.theme.FormatDescription("List hosts"))
-	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("hosts add <spec>"), a.theme.FormatDescription("Add host (user@host:port)"))
-	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("hosts show|delete <id>"), a.theme.FormatDescription("Show/delete host"))
-	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("hosts group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
-	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("connect <id|alias>"), a.theme.FormatDescription("Connect to host"))
+	fmt.Println(a.theme.FormatTableHeader("SSH Hosts (shortcuts: hl/ha/hr/hc):"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("host, hl"), a.theme.FormatDescription("List hosts"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("host add, ha <spec>"), a.theme.FormatDescription("Add host (user@host:port)"))
+	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("host delete, hr <id>"), a.theme.FormatDescription("Delete host"))
+	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("host connect, hc <id>"), a.theme.FormatDescription("Connect to host"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Database (MySQL):"))
-	fmt.Printf("  %s                          %s\n", a.theme.FormatCommand("db"), a.theme.FormatDescription("List connections"))
-	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("db add <spec>"), a.theme.FormatDescription("Add (user@host:port/dbname)"))
-	fmt.Printf("  %s        %s\n", a.theme.FormatCommand("db show|delete <id>"), a.theme.FormatDescription("Show/delete connection"))
-	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("db connect <id>"), a.theme.FormatDescription("Enter interactive shell"))
+	fmt.Println(a.theme.FormatTableHeader("Database (shortcuts: dl/da/dr/dc):"))
+	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("db, dl"), a.theme.FormatDescription("List connections"))
+	fmt.Printf("  %s       %s\n", a.theme.FormatCommand("db add, da <spec>"), a.theme.FormatDescription("Add (user@host:port/db)"))
+	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("db delete, dr <id>"), a.theme.FormatDescription("Delete connection"))
+	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("db connect, dc <id>"), a.theme.FormatDescription("Connect to database"))
 	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("db exec <id> <sql>"), a.theme.FormatDescription("Execute SQL query"))
-	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("db group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Cache (Redis):"))
-	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("cache"), a.theme.FormatDescription("List connections"))
-	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("cache add <spec>"), a.theme.FormatDescription("Add (host:port)"))
-	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("cache show|delete <id>"), a.theme.FormatDescription("Show/delete connection"))
-	fmt.Printf("  %s        %s\n", a.theme.FormatCommand("cache connect <id>"), a.theme.FormatDescription("Enter interactive shell"))
+	fmt.Println(a.theme.FormatTableHeader("Cache (shortcuts: cl/ca/cr/cc):"))
+	fmt.Printf("  %s                %s\n", a.theme.FormatCommand("cache, cl"), a.theme.FormatDescription("List connections"))
+	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("cache add, ca <spec>"), a.theme.FormatDescription("Add (host:port)"))
+	fmt.Printf("  %s %s\n", a.theme.FormatCommand("cache delete, cr <id>"), a.theme.FormatDescription("Delete connection"))
+	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("cache connect, cc <id>"), a.theme.FormatDescription("Connect to cache"))
 	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("cache exec <id> <cmd>"), a.theme.FormatDescription("Execute Redis command"))
-	fmt.Printf("  %s         %s\n", a.theme.FormatCommand("cache group|tag ..."), a.theme.FormatDescription("Manage groups/tags"))
 
 	fmt.Println()
 	fmt.Println(a.theme.FormatTableHeader("Batch & Transfer:"))
@@ -1182,7 +1179,7 @@ func (a *App) printCommandHelp() {
 
 	fmt.Println()
 	fmt.Println(a.theme.FormatTableHeader("Monitoring:"))
-	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("check"), a.theme.FormatDescription("Check hosts connectivity"))
+	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("check"), a.theme.FormatDescription("Check host connectivity"))
 	fmt.Printf("  %s             %s\n", a.theme.FormatCommand("monitor <host>"), a.theme.FormatDescription("Show resource metrics"))
 
 	fmt.Println()
@@ -1192,4 +1189,48 @@ func (a *App) printCommandHelp() {
 
 	fmt.Println()
 	fmt.Printf("%s\n", a.theme.FormatInfo("Use '<cmd> help' for detailed usage of each command."))
+}
+
+// executeSherlockCommand executes a parsed sherlock internal command.
+func (a *App) executeSherlockCommand(cmdInfo *agent.SherlockCommandInfo) error {
+	// Build the command string based on parsed info
+	var args []string
+
+	switch cmdInfo.Command {
+	case "host":
+		args = append(args, cmdInfo.Action)
+		args = append(args, cmdInfo.Args...)
+		return a.handleHostsEnhanced(args)
+
+	case "db":
+		args = append(args, cmdInfo.Action)
+		args = append(args, cmdInfo.Args...)
+		return a.handleDatabase(args)
+
+	case "cache":
+		args = append(args, cmdInfo.Action)
+		args = append(args, cmdInfo.Args...)
+		return a.handleCache(args)
+
+	case "check":
+		return a.handleCheck(cmdInfo.Args)
+
+	case "connect":
+		if len(cmdInfo.Args) > 0 {
+			return a.handleConnect("connect " + cmdInfo.Args[0])
+		}
+		return fmt.Errorf("connect requires a host ID or alias")
+
+	case "batch":
+		return a.handleBatch(cmdInfo.Args)
+
+	case "upload":
+		return a.handleUpload(cmdInfo.Args)
+
+	case "download":
+		return a.handleDownload(cmdInfo.Args)
+
+	default:
+		return fmt.Errorf("unknown sherlock command: %s", cmdInfo.Command)
+	}
 }

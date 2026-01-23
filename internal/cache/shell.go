@@ -82,6 +82,13 @@ func (s *Shell) Run(ctx context.Context) error {
 
 		s.liner.AppendHistory(line)
 
+		// Check for exit command - return to sherlock main loop
+		lowerLine := strings.ToLower(line)
+		if lowerLine == "exit" || lowerLine == "quit" {
+			fmt.Fprintln(s.out, "Bye")
+			return nil
+		}
+
 		// Handle special commands
 		if s.handleSpecialCommand(ctx, line) {
 			continue
@@ -107,8 +114,7 @@ func (s *Shell) handleSpecialCommand(ctx context.Context, input string) bool {
 
 	switch cmd {
 	case "exit", "quit":
-		fmt.Fprintln(s.out, "Bye")
-		os.Exit(0)
+		// Handled in Run() loop - should not reach here
 		return true
 
 	case "help":
