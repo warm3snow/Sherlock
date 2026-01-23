@@ -780,7 +780,7 @@ func (a *App) completeCommands(prefix string) []string {
 	// Built-in commands and shortcuts
 	builtinCommands := []string{
 		"help", "exit", "quit", "disconnect", "status", "history", "connect",
-		"list", "ls",                           // Unified list
+		"list",                                 // Unified list
 		"host", "hl", "ha", "hr", "hc",         // Host commands
 		"db", "dl", "da", "dr", "dc",           // Database commands
 		"cache", "cl", "ca", "cr", "cc",        // Cache commands
@@ -1146,7 +1146,7 @@ func (a *App) printCommandHelp() {
 	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help"))
 	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("exit, quit"), a.theme.FormatDescription("Exit Sherlock"))
 	fmt.Printf("  %s                      %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show status"))
-	fmt.Printf("  %s                    %s\n", a.theme.FormatCommand("list, ls"), a.theme.FormatDescription("List all connections"))
+	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("list"), a.theme.FormatDescription("List all connections"))
 
 	fmt.Println()
 	fmt.Println(a.theme.FormatTableHeader("SSH Hosts (shortcuts: hl/ha/hr/hc):"))
