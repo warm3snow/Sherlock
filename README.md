@@ -12,37 +12,58 @@
 
 Sherlock is an AI-based remote operations tool built on SSH. It enables you to interact with remote hosts using natural language commands.
 
-### Why Sherlock Over Traditional SSH?
+### Key Problems Sherlock Solves
 
-| Feature | Traditional SSH | Sherlock |
-|---------|----------------|----------|
-| **Natural Language Support** | ❌ Requires memorizing commands | ✅ Describe tasks in plain language |
-| **Command History & Saved Hosts** | ❌ Manual management required | ✅ Automatic login history and host management |
-| **Automation** | ❌ Requires scripting knowledge | ✅ AI-powered task automation |
-| **Learning Curve** | ❌ Steep learning curve for beginners | ✅ Intuitive natural language interface |
-| **Multi-step Operations** | ❌ Manual command chaining | ✅ AI understands complex tasks |
-| **Cross-language Support** | ❌ English commands only | ✅ Supports commands in multiple languages |
+Traditional SSH and remote server management presents several challenges that Sherlock addresses:
+
+| Problem | Traditional Approach | Sherlock Solution |
+|---------|---------------------|-------------------|
+| **Complex Command Memorization** | ❌ Requires memorizing dozens of shell commands and syntax | ✅ Describe tasks in plain language - AI translates to appropriate commands |
+| **Tedious Host Management** | ❌ Manual tracking of host IPs, credentials, and connection details | ✅ Automatic host discovery, saving, and smart connection management |
+| **Steep Learning Curve** | ❌ Beginners struggle with complex shell commands and workflows | ✅ Intuitive natural language interface lowers the barrier to entry |
+| **Time-consuming Multi-step Operations** | ❌ Manual command chaining and scripting required | ✅ AI understands complex tasks and automates multi-step workflows |
+| **Limited Multi-language Support** | ❌ English-centric interfaces and commands | ✅ Full support for commands in multiple languages (English, Chinese, etc.) |
+| **Manual Authentication Setup** | ❌ Time-consuming SSH key setup and management | ✅ Automatic SSH key management and seamless authentication |
+| **Lack of Batch Operations** | ❌ No built-in tools for managing multiple servers simultaneously | ✅ Powerful batch execution across multiple hosts with progress tracking |
+| **Poor File Transfer Experience** | ❌ Cumbersome file transfer processes | ✅ Integrated SFTP with progress tracking and resume capability |
+| **No Host Monitoring** | ❌ No built-in health/status checking for servers | ✅ Real-time host connectivity and status monitoring |
 
 #### Key Advantages
 
 1. **🗣️ Natural Language Interface** - No need to memorize complex shell commands. Simply describe what you want to do in plain English or Chinese, and Sherlock will translate it to the appropriate commands.
 
-2. **📜 Smart History Management** - Sherlock automatically saves your connection history and host information, allowing you to quickly reconnect to previous servers with a simple `connect <id>` command.
+2. **📜 Smart Host Management** - Sherlock automatically saves your connection history and host information with advanced features like grouping, tagging, and search capabilities. Reconnect to previous servers with a simple `connect <id>` command.
 
-3. **🤖 AI-Powered Automation** - Complex multi-step operations become simple one-line requests. The AI understands context and can execute sophisticated workflows automatically.
+3. **🤖 AI-Powered Automation** - Complex multi-step operations become simple one-line requests. The AI understands context and can execute sophisticated workflows automatically, including conditional logic and error handling.
 
-4. **🔑 Automatic SSH Key Management** - Sherlock handles SSH key authentication seamlessly. After your first password-based connection, it automatically sets up key-based authentication for future logins.
+4. **🔑 Automatic SSH Key Management** - Sherlock handles SSH key authentication seamlessly. After your first password-based connection, it automatically sets up key-based authentication for future logins, enhancing security and convenience.
 
-5. **🌍 Multi-language Support** - Interact with your servers in your preferred language. Sherlock understands commands in both English and Chinese.
+5. **🌍 Multi-language Support** - Interact with your servers in your preferred language. Sherlock understands commands in both English and Chinese, making it accessible to global users.
 
-6. **🔌 Multiple LLM Providers** - Choose from local (Ollama) or cloud-based (OpenAI, DeepSeek) AI providers based on your privacy and performance needs.
+6. **🔌 Multiple LLM Providers** - Choose from local (Ollama) or cloud-based (OpenAI, DeepSeek) AI providers based on your privacy and performance needs, ensuring flexibility and data control.
 
-### Features
+7. **⚡ Batch Operations** - Execute commands across multiple hosts simultaneously with configurable concurrency, progress tracking, and detailed reporting. Perfect for managing server farms and clusters.
+
+8. **📁 Advanced File Transfer** - Built-in SFTP client with progress tracking, resume capability, and recursive directory operations. Transfer files between local and remote systems effortlessly.
+
+9. **🔍 Host Monitoring** - Real-time connectivity and status checking for all your hosts. Monitor uptime, latency, and SSH availability with detailed reports and summaries.
+
+10. **🏷️ Host Organization** - Organize your hosts with groups and tags for better management. Quickly filter and operate on subsets of your infrastructure.
+
+### Core Features
 
 1. **Natural Language Connection** - Connect to remote hosts by describing what you want in plain language
 2. **Automatic SSH Key Management** - After password-based connection, automatically adds your local SSH public key to the remote host's authorized_keys for future passwordless authentication
 3. **AI-powered Command Execution** - Describe what you want to do in natural language, and Sherlock will translate it to shell commands
 4. **Multiple LLM Provider Support** - Works with local Ollama, DeepSeek, or OpenAI APIs using the CloudWeGo Eino framework
+5. **Smart Host Discovery** - Automatically detect SSH, MySQL, and Redis connections from natural language input
+6. **Batch Command Execution** - Run commands across multiple hosts with progress tracking and result aggregation
+7. **Advanced File Transfer** - SFTP-based file operations with progress tracking and resume capability
+8. **Host Monitoring** - Real-time connectivity and status checking for all saved hosts
+9. **Host Organization** - Group and tag hosts for better management and filtering
+10. **Interactive Terminal Support** - Full PTY support for commands like `top`, `htop`, `vim`, and `less`
+11. **Command Whitelisting** - Fast execution of common commands without AI processing overhead
+12. **Secure Credential Handling** - Encrypted storage and secure transmission of authentication credentials
 
 ### Installation
 
@@ -308,14 +329,6 @@ Contributions are welcome! Feel free to:
 - 🐛 Report bugs or request features through [Issues](https://github.com/warm3snow/sherlock/issues)
 - 🔧 Submit Pull Requests to help improve the project
 - 📖 Improve documentation
-
-## ☕ Support
-
-If this project has been helpful to you, consider buying me a coffee! Your support is greatly appreciated and helps keep this project active.
-
-<a href="https://www.buymeacoffee.com/warm3snow">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=warm3snow&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
-</a>
 
 ---
 
