@@ -521,6 +521,9 @@ func (a *App) connectToHost(host string, port int, user string) error {
 			a.sshClient = client
 			fmt.Printf("%s %s\n", a.theme.FormatSuccess("Successfully connected to"), client.HostInfoString()+" using SSH key")
 
+			// Detect remote machine context for AI command generation
+			a.detectRemoteMachineContext()
+
 			// Update history
 			if a.historyManager != nil {
 				_ = a.historyManager.AddRecord(host, port, user, true)
@@ -577,6 +580,9 @@ func (a *App) connectToHost(host string, port int, user string) error {
 	a.sshClient = client
 	fmt.Printf("%s %s\n", a.theme.FormatSuccess("Successfully connected to"), client.HostInfoString())
 
+	// Detect remote machine context for AI command generation
+	a.detectRemoteMachineContext()
+
 	// Optionally add public key to authorized_keys
 	pubKeyAdded := false
 	if a.cfg.SSHKey.AutoAddToRemote {
@@ -607,15 +613,15 @@ func (a *App) handleDirectCommand(cmd string) error {
 }
 
 func (a *App) handleCommandRequest(input string) error {
-	// Check if it's a direct shell command (in whitelist)
-	isDirectCommand := a.agent.IsShellCommand(input)
+	// Check if it's a direct command with $ prefix (bypass AI)
+	isDirectCommand := strings.HasPrefix(strings.TrimSpace(input), "$")
 
-	// Show "thinking..." only when using LLM (not in whitelist)
+	// Show "thinking..." for AI-processed commands
 	if !isDirectCommand {
-		fmt.Print(a.theme.FormatInfo("Thinking..."))
+		fmt.Print(a.theme.FormatInfo("🤔 AI Thinking..."))
 	}
 
-	// Parse command using AI
+	// Parse command using AI (or direct execution for $ prefix)
 	cmdInfo, err := a.agent.ParseCommandRequest(a.ctx, input)
 	if err != nil {
 		if !isDirectCommand {
@@ -624,22 +630,19 @@ func (a *App) handleCommandRequest(input string) error {
 		return fmt.Errorf("failed to parse command request: %w", err)
 	}
 
-	// Clear "thinking..." and show generated command when using LLM
+	// Clear "thinking..." and show generated command
 	if !isDirectCommand {
 		fmt.Print("\r\033[K") // Clear the line
+		if cmdInfo.Description != "" {
+			fmt.Printf("%s %s\n", a.theme.FormatInfo("📝"), cmdInfo.Description)
+		}
 		for _, cmd := range cmdInfo.Commands {
 			fmt.Printf("%s %s\n", a.theme.FormatInfo(">"), a.theme.FormatCommand(cmd))
 		}
 	}
 
-	// Confirm if needed (show commands for dangerous operations)
+	// Confirm if needed for dangerous operations
 	if cmdInfo.NeedsConfirm {
-		if isDirectCommand {
-			// For direct commands, show the command before confirmation
-			for _, cmd := range cmdInfo.Commands {
-				fmt.Printf("%s %s\n", a.theme.FormatInfo(">"), a.theme.FormatCommand(cmd))
-			}
-		}
 		confirm, err := a.liner.Prompt(a.theme.FormatWarning("⚠️  This operation may be dangerous. Continue? [y/N]: "))
 		if err != nil {
 			fmt.Println(a.theme.FormatInfo("Operation cancelled."))
@@ -652,7 +655,7 @@ func (a *App) handleCommandRequest(input string) error {
 		}
 	}
 
-	// Execute commands (no output for direct commands)
+	// Execute commands
 	for _, cmd := range cmdInfo.Commands {
 		if err := a.executeCommand(cmd); err != nil {
 			return err
@@ -718,7 +721,83 @@ func (a *App) disconnect() error {
 
 	a.sshClient = nil
 	fmt.Println("Disconnected.")
+
+	// Reset machine context to local
+	a.resetToLocalMachineContext()
+
 	return nil
+}
+
+// detectRemoteMachineContext detects the remote machine's OS and updates the agent context.
+func (a *App) detectRemoteMachineContext() {
+	if a.sshClient == nil || !a.sshClient.IsConnected() {
+		return
+	}
+
+	ctx := &agent.MachineContext{
+		IsRemote: true,
+	}
+
+	// Detect OS using uname
+	result := a.sshClient.Execute(a.ctx, "uname -s")
+	if result.Error == nil {
+		osName := strings.TrimSpace(result.Stdout)
+		switch strings.ToLower(osName) {
+		case "linux":
+			ctx.OS = "Linux"
+		case "darwin":
+			ctx.OS = "macOS"
+		default:
+			ctx.OS = osName
+		}
+	}
+
+	// Detect architecture
+	result = a.sshClient.Execute(a.ctx, "uname -m")
+	if result.Error == nil {
+		ctx.Arch = strings.TrimSpace(result.Stdout)
+	}
+
+	// Detect hostname
+	result = a.sshClient.Execute(a.ctx, "hostname")
+	if result.Error == nil {
+		ctx.Hostname = strings.TrimSpace(result.Stdout)
+	}
+
+	// Detect Linux distribution if applicable
+	if ctx.OS == "Linux" {
+		result = a.sshClient.Execute(a.ctx, "cat /etc/os-release 2>/dev/null | grep -E '^(ID|VERSION_ID)=' | head -2")
+		if result.Error == nil && result.Stdout != "" {
+			lines := strings.Split(result.Stdout, "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "ID=") {
+					distro := strings.TrimPrefix(line, "ID=")
+					distro = strings.Trim(distro, "\"")
+					ctx.Distribution = distro
+					break
+				}
+			}
+		}
+	}
+
+	// Update agent context
+	a.agent.SetMachineContext(ctx)
+
+	// Show detected context
+	fmt.Printf("%s OS: %s", a.theme.FormatInfo("🖥️  Detected:"), ctx.OS)
+	if ctx.Distribution != "" {
+		fmt.Printf(" (%s)", ctx.Distribution)
+	}
+	if ctx.Arch != "" {
+		fmt.Printf(", Arch: %s", ctx.Arch)
+	}
+	fmt.Println()
+}
+
+// resetToLocalMachineContext resets the agent context to local machine.
+func (a *App) resetToLocalMachineContext() {
+	// The agent will detect local context automatically
+	a.agent.SetMachineContext(nil)
 }
 
 func (a *App) showStatus() {

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -31,10 +32,20 @@ import (
 	"github.com/warm3snow/sherlock/pkg/sshclient"
 )
 
+// MachineContext holds the context information about the target machine.
+type MachineContext struct {
+	OS           string // Operating system: linux, darwin (macOS), windows
+	Arch         string // Architecture: amd64, arm64, etc.
+	Distribution string // Linux distribution: ubuntu, centos, debian, etc.
+	IsRemote     bool   // Whether connected to a remote machine
+	Hostname     string // Machine hostname
+}
+
 // Agent handles natural language processing for SSH operations.
 type Agent struct {
 	aiClient            ai.ModelClient
 	customShellCommands map[string]bool
+	machineContext      *MachineContext
 }
 
 // NewAgent creates a new Agent with the given AI client.
@@ -42,7 +53,40 @@ func NewAgent(aiClient ai.ModelClient) *Agent {
 	return &Agent{
 		aiClient:            aiClient,
 		customShellCommands: make(map[string]bool),
+		machineContext:      detectLocalMachineContext(),
 	}
+}
+
+// SetMachineContext sets the machine context for command generation.
+func (a *Agent) SetMachineContext(ctx *MachineContext) {
+	a.machineContext = ctx
+}
+
+// GetMachineContext returns the current machine context.
+func (a *Agent) GetMachineContext() *MachineContext {
+	return a.machineContext
+}
+
+// detectLocalMachineContext detects the local machine's context.
+func detectLocalMachineContext() *MachineContext {
+	ctx := &MachineContext{
+		IsRemote: false,
+		Arch:     runtime.GOARCH,
+	}
+
+	// Detect OS using runtime
+	switch runtime.GOOS {
+	case "darwin":
+		ctx.OS = "macOS"
+	case "linux":
+		ctx.OS = "Linux"
+	case "windows":
+		ctx.OS = "Windows"
+	default:
+		ctx.OS = runtime.GOOS
+	}
+
+	return ctx
 }
 
 // SetCustomShellCommands sets the custom shell commands whitelist.
@@ -124,10 +168,19 @@ Examples:
 - "连接 redis 192.168.1.1:6379" -> {"type": "cache", "host": "192.168.1.1", "port": 6379}
 - "登录缓存 192.168.1.1" -> {"type": "cache", "host": "192.168.1.1", "port": 6379}`
 
-const systemPromptCommand = `You are Sherlock, an AI assistant for SSH remote operations.
+const systemPromptCommandTemplate = `You are Sherlock, an AI assistant for remote operations.
 Your task is to translate natural language requests into shell commands.
 
+IMPORTANT: You must generate commands compatible with the target system:
+%s
+
 When the user describes what they want to do, generate the appropriate shell command(s).
+Support both English and Chinese natural language inputs.
+
+Key differences between systems:
+- macOS: Uses 'brew' for package management, 'launchctl' for services, BSD-style commands
+- Linux: Uses 'apt/yum/dnf' for packages, 'systemctl' for services, GNU-style commands
+- Commands like 'find', 'sed', 'grep' may have different flags between macOS and Linux
 
 Respond in JSON format only:
 {
@@ -142,11 +195,40 @@ Set "needs_confirm" to true for potentially dangerous operations like:
 - Stopping/restarting services
 - Any command that could cause data loss
 
-Examples:
-- "show me disk usage" -> {"commands": ["df -h"], "description": "Display disk space usage in human-readable format", "needs_confirm": false}
-- "list files in current directory" -> {"commands": ["ls -la"], "description": "List all files including hidden ones with details", "needs_confirm": false}
-- "remove the tmp folder" -> {"commands": ["rm -rf tmp"], "description": "Recursively remove the tmp directory and its contents", "needs_confirm": true}
-- "restart nginx service" -> {"commands": ["sudo systemctl restart nginx"], "description": "Restart the nginx service", "needs_confirm": true}`
+Examples for Linux:
+- "show me disk usage" -> {"commands": ["df -h"], "description": "Display disk space usage", "needs_confirm": false}
+- "find large files over 1GB" -> {"commands": ["find / -type f -size +1G 2>/dev/null"], "description": "Find files larger than 1GB", "needs_confirm": false}
+- "restart nginx service" -> {"commands": ["sudo systemctl restart nginx"], "description": "Restart nginx service", "needs_confirm": true}
+
+Examples for macOS:
+- "show me disk usage" -> {"commands": ["df -h"], "description": "Display disk space usage", "needs_confirm": false}
+- "find large files over 1GB" -> {"commands": ["find / -type f -size +1G 2>/dev/null"], "description": "Find files larger than 1GB", "needs_confirm": false}
+- "restart nginx service" -> {"commands": ["brew services restart nginx"], "description": "Restart nginx service", "needs_confirm": true}`
+
+// buildSystemPromptCommand builds the system prompt with machine context.
+func (a *Agent) buildSystemPromptCommand() string {
+	contextInfo := "Target system: Unknown"
+	if a.machineContext != nil {
+		var parts []string
+		parts = append(parts, fmt.Sprintf("Operating System: %s", a.machineContext.OS))
+		if a.machineContext.Arch != "" {
+			parts = append(parts, fmt.Sprintf("Architecture: %s", a.machineContext.Arch))
+		}
+		if a.machineContext.Distribution != "" {
+			parts = append(parts, fmt.Sprintf("Distribution: %s", a.machineContext.Distribution))
+		}
+		if a.machineContext.Hostname != "" {
+			parts = append(parts, fmt.Sprintf("Hostname: %s", a.machineContext.Hostname))
+		}
+		if a.machineContext.IsRemote {
+			parts = append(parts, "Connection: Remote (SSH)")
+		} else {
+			parts = append(parts, "Connection: Local")
+		}
+		contextInfo = strings.Join(parts, "\n")
+	}
+	return fmt.Sprintf(systemPromptCommandTemplate, contextInfo)
+}
 
 // ConnectionType represents the type of connection (SSH, Database, Cache).
 type ConnectionType string
@@ -553,27 +635,25 @@ func (a *Agent) parseCommandDirect(request string) *CommandInfo {
 	return nil
 }
 
-// ParseCommandRequest parses a natural language command request.
+// ParseCommandRequest parses a natural language command request using AI.
+// Only commands prefixed with '$' are executed directly without AI processing.
+// All other inputs are analyzed by AI with machine context awareness.
 func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*CommandInfo, error) {
-	// Check for direct command execution with $ prefix
+	// Check for direct command execution with $ prefix - bypass AI
 	if strings.HasPrefix(strings.TrimSpace(request), "$") {
 		cmd := strings.TrimPrefix(strings.TrimSpace(request), "$")
 		cmd = strings.TrimSpace(cmd)
 		return &CommandInfo{
 			Commands:     []string{cmd},
 			Description:  "Direct command execution",
-			NeedsConfirm: false,
+			NeedsConfirm: isDangerousCommand(cmd),
 		}, nil
 	}
 
-	// Check if it's a common shell command that can be executed directly
-	if info := a.parseCommandDirect(request); info != nil {
-		return info, nil
-	}
-
-	// Fall back to AI parsing for natural language requests
+	// All other commands go through AI analysis with machine context
+	systemPrompt := a.buildSystemPromptCommand()
 	messages := []*schema.Message{
-		schema.SystemMessage(systemPromptCommand),
+		schema.SystemMessage(systemPrompt),
 		schema.UserMessage(request),
 	}
 
