@@ -362,8 +362,10 @@ func isDangerousCommand(input string) bool {
 	return dangerousCommandsMap[cmdName]
 }
 
-// IsShellCommand checks if the input looks like a common shell command.
-// It returns true if the input starts with a known command prefix or is in the custom whitelist.
+// IsShellCommand checks if the input looks like a common shell command with valid syntax.
+// It returns true only if:
+// 1. The input starts with a known command prefix (in whitelist), AND
+// 2. The arguments look like valid shell syntax (flags, paths, etc.) rather than natural language.
 func (a *Agent) IsShellCommand(input string) bool {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -377,22 +379,153 @@ func (a *Agent) IsShellCommand(input string) bool {
 	}
 	cmdName := strings.ToLower(parts[0])
 
-	// Check custom whitelist first (O(1) lookup)
-	if a.customShellCommands[cmdName] {
-		return true
-	}
-
-	// O(1) lookup using built-in map
-	if commonShellCommandsMap[cmdName] {
-		return true
-	}
+	// Check if command is in whitelist (custom or built-in)
+	isWhitelisted := a.customShellCommands[cmdName] || commonShellCommandsMap[cmdName]
 
 	// Check for commands with path prefix (e.g., /usr/bin/ls, ./script.sh)
-	// This allows users to run local scripts directly without LLM translation
-	if strings.HasPrefix(input, "/") || strings.HasPrefix(input, "./") || strings.HasPrefix(input, "../") {
+	isPathCommand := strings.HasPrefix(input, "/") || strings.HasPrefix(input, "./") || strings.HasPrefix(input, "../")
+
+	if !isWhitelisted && !isPathCommand {
+		return false
+	}
+
+	// If only one word (just the command), treat as shell command
+	if len(parts) == 1 {
 		return true
 	}
 
+	// Check if arguments look like valid shell syntax vs natural language
+	// Natural language indicators: common English words that are unlikely to be shell arguments
+	naturalLanguageWords := map[string]bool{
+		"the": true, "a": true, "an": true, "and": true, "or": true, "but": true,
+		"for": true, "to": true, "in": true, "on": true, "at": true, "by": true,
+		"with": true, "from": true, "of": true, "as": true, "is": true, "are": true,
+		"was": true, "were": true, "be": true, "been": true, "being": true,
+		"have": true, "has": true, "had": true, "do": true, "does": true, "did": true,
+		"will": true, "would": true, "could": true, "should": true, "may": true, "might": true,
+		"must": true, "can": true, "this": true, "that": true, "these": true, "those": true,
+		"my": true, "your": true, "his": true, "her": true, "its": true, "our": true, "their": true,
+		"me": true, "you": true, "him": true, "them": true, "us": true,
+		"what": true, "which": true, "who": true, "whom": true, "whose": true,
+		"where": true, "when": true, "why": true, "how": true,
+		"all": true, "each": true, "every": true, "both": true, "few": true, "more": true,
+		"most": true, "other": true, "some": true, "any": true, "no": true, "not": true,
+		"only": true, "own": true, "same": true, "so": true, "than": true, "too": true,
+		"very": true, "just": true, "also": true, "here": true, "there": true,
+		"then": true, "once": true, "over": true, "under": true, "again": true, "further": true,
+		"about": true, "into": true, "through": true, "during": true, "before": true, "after": true,
+		"above": true, "below": true, "between": true, "up": true, "down": true, "out": true,
+		"off": true, "such": true, "because": true, "until": true, "while": true,
+		// Common natural language verbs/adjectives
+		"show": true, "find": true, "get": true, "list": true, "display": true, "print": true,
+		"large": true, "small": true, "big": true, "new": true, "old": true,
+		"files": true, "directories": true, "folders": true,
+		"running": true, "processes": true, "services": true,
+		"disk": true, "memory": true, "cpu": true, "usage": true, "space": true,
+		"please": true, "help": true, "give": true, "tell": true,
+	}
+
+	// Common shell argument words that look like natural language but are valid shell args
+	shellArgumentWords := map[string]bool{
+		"now": true, "all": true, "force": true, "yes": true, "no": true,
+		"start": true, "stop": true, "restart": true, "status": true,
+		"enable": true, "disable": true, "reload": true,
+		"root": true, "admin": true, "user": true,
+		"nginx": true, "apache": true, "mysql": true, "redis": true, "docker": true,
+	}
+
+	// Known subcommands for specific tools (kubectl, docker, git, etc.)
+	// These look like natural language but are valid shell subcommands
+	knownSubcommands := map[string]map[string]bool{
+		"kubectl": {"get": true, "describe": true, "create": true, "delete": true, "apply": true,
+			"logs": true, "exec": true, "port-forward": true, "scale": true, "rollout": true,
+			"pods": true, "services": true, "deployments": true, "nodes": true, "namespaces": true,
+			"configmaps": true, "secrets": true, "ingress": true, "pv": true, "pvc": true},
+		"docker": {"run": true, "exec": true, "build": true, "pull": true, "push": true,
+			"images": true, "ps": true, "stop": true, "start": true, "restart": true,
+			"rm": true, "rmi": true, "logs": true, "inspect": true, "network": true, "volume": true},
+		"git": {"status": true, "log": true, "diff": true, "add": true, "commit": true,
+			"push": true, "pull": true, "fetch": true, "branch": true, "checkout": true,
+			"merge": true, "rebase": true, "reset": true, "stash": true, "clone": true},
+		"systemctl": {"status": true, "start": true, "stop": true, "restart": true,
+			"enable": true, "disable": true, "reload": true, "list-units": true},
+		"apt": {"install": true, "remove": true, "update": true, "upgrade": true, "search": true},
+		"yum": {"install": true, "remove": true, "update": true, "search": true, "list": true},
+		"pip": {"install": true, "uninstall": true, "freeze": true, "list": true, "show": true},
+		"npm": {"install": true, "uninstall": true, "run": true, "start": true, "test": true, "build": true},
+	}
+
+	// Check if this is a known tool with subcommands
+	if subCmds, ok := knownSubcommands[cmdName]; ok {
+		// For known tools, check if next arg is a valid subcommand
+		if len(parts) > 1 {
+			nextArg := strings.ToLower(parts[1])
+			if subCmds[nextArg] {
+				return true
+			}
+		}
+	}
+
+	// Count natural language words in arguments
+	naturalWordCount := 0
+	shellArgCount := 0
+
+	for i := 1; i < len(parts); i++ {
+		arg := strings.ToLower(parts[i])
+
+		// Shell-like arguments: flags (-x, --flag), paths (/path, ./path), numbers, globs (*.txt)
+		if strings.HasPrefix(arg, "-") ||
+			strings.HasPrefix(arg, "/") ||
+			strings.HasPrefix(arg, "./") ||
+			strings.HasPrefix(arg, "../") ||
+			strings.HasPrefix(arg, "~") ||
+			strings.Contains(arg, "*") ||
+			strings.Contains(arg, "?") ||
+			strings.Contains(arg, "=") ||
+			strings.Contains(arg, ":") ||
+			isNumeric(arg) ||
+			isFilePath(arg) ||
+			shellArgumentWords[arg] {
+			shellArgCount++
+		} else if naturalLanguageWords[arg] {
+			naturalWordCount++
+		}
+	}
+
+	// If more natural language words than shell arguments, likely natural language
+	// Exception: if no natural words detected, treat as shell command
+	if naturalWordCount > 0 && naturalWordCount >= shellArgCount {
+		return false
+	}
+
+	return true
+}
+
+// isNumeric checks if a string is a number (integer or float).
+func isNumeric(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
+// isFilePath checks if a string looks like a file path.
+func isFilePath(s string) bool {
+	// Check for common file path patterns
+	if strings.Contains(s, "/") {
+		return true
+	}
+	// Check for file extensions
+	if strings.Contains(s, ".") && !strings.HasPrefix(s, ".") {
+		ext := strings.ToLower(s[strings.LastIndex(s, "."):])
+		commonExts := map[string]bool{
+			".txt": true, ".log": true, ".conf": true, ".cfg": true, ".json": true,
+			".xml": true, ".yml": true, ".yaml": true, ".sh": true, ".bash": true,
+			".go": true, ".py": true, ".js": true, ".ts": true, ".java": true,
+			".c": true, ".cpp": true, ".h": true, ".hpp": true, ".rs": true,
+			".md": true, ".html": true, ".css": true, ".sql": true,
+			".tar": true, ".gz": true, ".zip": true, ".bz2": true, ".xz": true,
+		}
+		return commonExts[ext]
+	}
 	return false
 }
 
