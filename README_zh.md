@@ -3,136 +3,88 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Go Version](https://img.shields.io/badge/Go-1.18+-00ADD8?logo=go)](https://golang.org/)
 [![GitHub stars](https://img.shields.io/github/stars/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/warm3snow/sherlock?style=social)](https://github.com/warm3snow/sherlock/network/members)
-[![GitHub issues](https://img.shields.io/github/issues/warm3snow/sherlock)](https://github.com/warm3snow/sherlock/issues)
 
 [English](README.md) | [中文](README_zh.md)
 
-## Sherlock - 基于AI的远程运维工具
+## 🔍 基于 AI 的 SSH 远程运维工具
 
-Sherlock 是一个基于 AI 的远程运维工具，底层基于 SSH。它可以让您通过自然语言与远程主机进行交互。
+Sherlock 是一款 AI 驱动的远程运维工具，底层基于 SSH。使用**自然语言**与远程主机交互，无需记忆复杂的 shell 命令。
 
-### Sherlock 解决的核心问题
+### ✨ 核心特性
 
-传统的 SSH 和远程服务器管理存在诸多挑战，Sherlock 有效解决了这些问题：
+| 类别 | 功能 |
+|------|------|
+| **🗣️ 自然语言交互** | 用中文/英文描述任务，AI 自动转换为 shell 命令 |
+| **🤖 AI 智能运维** | 智能诊断、问题分析、一键修复、自动化剧本 |
+| **📊 可视化仪表盘** | 终端 ASCII 图表、多主机状态矩阵、健康评分 |
+| **⚡ 批量操作** | 多主机并行执行命令，支持进度跟踪 |
+| **🔐 安全管理** | 自动 SSH 密钥管理、凭据加密、操作审计 |
+| **📁 文件传输** | SFTP 支持进度显示、断点续传、递归操作 |
 
-| 问题 | 传统方式 | Sherlock 解决方案 |
-|------|----------|------------------|
-| **复杂的命令记忆** | ❌ 需要记忆大量 shell 命令和语法 | ✅ 用自然语言描述任务 - AI 自动转换为相应命令 |
-| **繁琐的主机管理** | ❌ 手动跟踪主机 IP、凭据和连接详情 | ✅ 自动主机发现、保存和智能连接管理 |
-| **陡峭的学习曲线** | ❌ 新手难以掌握复杂的 shell 命令和工作流 | ✅ 直观的自然语言界面，降低入门门槛 |
-| **耗时的多步操作** | ❌ 需要手动命令链和脚本编写 | ✅ AI 理解复杂任务并自动执行多步工作流 |
-| **有限的多语言支持** | ❌ 以英语为中心的界面和命令 | ✅ 全面支持多语言命令（中文、英文等） |
-| **手动认证设置** | ❌ 耗时的 SSH 密钥设置和管理 | ✅ 自动 SSH 密钥管理和无缝认证 |
-| **缺乏批量操作** | ❌ 没有内置工具同时管理多个服务器 | ✅ 强大的批量执行功能，支持进度跟踪 |
-| **糟糕的文件传输体验** | ❌ 繁琐的文件传输过程 | ✅ 集成 SFTP，支持进度跟踪和断点续传 |
-| **缺少主机监控** | ❌ 没有内置的服务器健康状况检查 | ✅ 实时主机连接性和状态监控 |
+### 🏗️ 系统架构
 
-#### 核心优势
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Sherlock CLI                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │   Advisor   │  │  Playbook   │  │  Dashboard  │  │    Audit    │        │
+│  │ (AI分析诊断) │  │ (自动化剧本) │  │ (可视化面板) │  │  (操作审计)  │        │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
+│         │                │                │                │               │
+│  ┌──────┴────────────────┴────────────────┴────────────────┴──────┐        │
+│  │                        Core Engine                              │        │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │        │
+│  │  │  Agent  │  │ Analyzer│  │  Batch  │  │ Monitor │           │        │
+│  │  │ (NLP)   │  │ (诊断)  │  │ (批量)  │  │ (监控)  │           │        │
+│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘           │        │
+│  └───────┼────────────┼────────────┼────────────┼────────────────┘        │
+│          │            │            │            │                          │
+│  ┌───────┴────────────┴────────────┴────────────┴────────────────┐        │
+│  │                     Infrastructure Layer                       │        │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │        │
+│  │  │SSH Client│  │ Tunnel  │  │Transfer │  │ Session │           │        │
+│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘           │        │
+│  └────────────────────────────────────────────────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────┘
+         │                              │                              │
+         ▼                              ▼                              ▼
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│  Remote Hosts   │          │   LLM Services  │          │   Local Storage │
+│  (SSH/SFTP)     │          │ Ollama/OpenAI/  │          │  (SQLite/JSON)  │
+│                 │          │    DeepSeek     │          │                 │
+└─────────────────┘          └─────────────────┘          └─────────────────┘
+```
 
-1. **🗣️ 自然语言交互** - 无需记忆复杂的 shell 命令。只需用中文或英文描述您想做的事情，Sherlock 就会将其转换为相应的命令。
-
-2. **📜 智能主机管理** - Sherlock 自动保存您的连接历史和主机信息，具有高级功能如分组、标签和搜索能力。通过简单的 `connect <id>` 命令即可快速重新连接之前的服务器。
-
-3. **🤖 AI 驱动自动化** - 复杂的多步操作变成简单的一行请求。AI 能够理解上下文，自动执行复杂的工作流程，包括条件逻辑和错误处理。
-
-4. **🔑 自动 SSH 密钥管理** - Sherlock 无缝处理 SSH 密钥认证。在首次密码连接后，它会自动设置基于密钥的认证，增强安全性和便利性。
-
-5. **🌍 多语言支持** - 使用您喜欢的语言与服务器交互。Sherlock 支持中文和英文命令，使其适用于全球用户。
-
-6. **🔌 多种 LLM 提供商** - 根据您的隐私和性能需求，选择本地（Ollama）或云端（OpenAI、DeepSeek）AI 提供商，确保灵活性和数据控制。
-
-7. **⚡ 批量操作** - 同时在多个主机上执行命令，支持可配置的并发性、进度跟踪和详细报告。非常适合管理服务器集群。
-
-8. **📁 高级文件传输** - 内置 SFTP 客户端，支持进度跟踪、断点续传和递归目录操作。轻松在本地和远程系统之间传输文件。
-
-9. **🔍 主机监控** - 实时监控所有主机的连接性和状态。监控正常运行时间、延迟和 SSH 可用性，并提供详细的报告和摘要。
-
-10. **🏷️ 主机组织** - 使用分组和标签组织主机以实现更好的管理。快速筛选和操作基础设施的子集。
-
-### 主要功能
-
-1. **自然语言连接** - 通过自然语言描述来连接远程主机
-2. **自动 SSH 密钥管理** - 通过密码连接后，自动将本地 SSH 公钥添加到远程主机的 authorized_keys，实现后续免密登录
-3. **AI 驱动的命令执行** - 用自然语言描述想要执行的操作，Sherlock 会将其转换为 shell 命令
-4. **多种 LLM 支持** - 支持本地 Ollama、DeepSeek 或 OpenAI API，使用字节跳动 CloudWeGo Eino 框架
-5. **智能主机发现** - 从自然语言输入中自动检测 SSH、MySQL 和 Redis 连接
-6. **批量命令执行** - 在多个主机上运行命令，支持进度跟踪和结果聚合
-7. **高级文件传输** - 基于 SFTP 的文件操作，支持进度跟踪和断点续传
-8. **主机监控** - 实时监控所有已保存主机的连接性和状态
-9. **主机组织** - 分组和标记主机以实现更好的管理和过滤
-10. **交互式终端支持** - 完整的 PTY 支持，适用于 `top`、`htop`、`vim` 和 `less` 等命令
-11. **命令白名单** - 快速执行常用命令，无需 AI 处理开销
-12. **安全凭据处理** - 加密存储和安全传输认证凭据
-
-### 安装
-
-#### 从源码构建
+### 🚀 快速开始
 
 ```bash
-# 克隆仓库
+# 安装
 git clone https://github.com/warm3snow/sherlock.git
-cd Sherlock
+cd sherlock && go build -o sherlock ./cmd/sherlock
 
-# 构建
-go build -o sherlock ./cmd/sherlock
+# 运行
+./sherlock
 
-# 可选：安装到 $GOPATH/bin
-go install ./cmd/sherlock
+# 连接主机（自然语言）
+sherlock> 连接到 192.168.1.100 用户名 root
+
+# 执行命令（自然语言）
+sherlock[root@192.168.1.100]> 查看磁盘使用情况
+sherlock[root@192.168.1.100]> 找出大于1GB的文件
+
+# AI 运维功能
+sherlock> advisor              # AI 智能运维助手
+sherlock> inspect              # 一键健康巡检
+sherlock> playbook run daily-inspect  # 执行运维剧本
+sherlock> dashboard            # 可视化仪表盘
+sherlock> audit stats          # 审计统计
 ```
 
-### 配置
+### ⚙️ 配置
 
-Sherlock 使用 JSON 配置文件，默认位置为 `~/.config/sherlock/config.json`。
+创建配置文件 `~/.config/sherlock/config.json`：
 
-#### SSH 密钥自动检测
-
-Sherlock 会自动从 `~/.ssh/` 目录检测 SSH 密钥。优先使用 `id_ed25519`，如果没有则使用 `id_rsa`。如果两者都没有找到，会显示警告信息并使用密码登录。
-
-通常不需要手动配置 SSH 密钥。如果需要覆盖自动检测，可以在配置文件中指定路径：
-
-```json
-{
-  "llm": {
-    "provider": "ollama",
-    "base_url": "http://localhost:11434",
-    "model": "qwen2.5:7b",
-    "temperature": 0.7
-  },
-  "ssh_key": {
-    "private_key_path": "~/.ssh/id_rsa",
-    "public_key_path": "~/.ssh/id_rsa.pub",
-    "auto_add_to_remote": true
-  },
-  "ui": {
-    "theme": "dracula"
-  }
-}
-```
-
-**注意：** `ssh_key` 配置项是可选的。如果不配置，Sherlock 会自动检测 SSH 密钥。
-
-#### 界面主题
-
-Sherlock 支持三种颜色主题：
-
-- **default** - 简洁的单色主题（无颜色）
-- **dracula** - 流行的暗色主题，带有紫色/粉色强调色
-- **solarized** - 专业的配色方案，使用蓝色/青色调
-
-要更改主题，请在配置文件中添加 `ui` 部分：
-
-```json
-{
-  "ui": {
-    "theme": "dracula"
-  }
-}
-```
-
-#### LLM 提供商配置
-
-**Ollama (本地)**
 ```json
 {
   "llm": {
@@ -143,178 +95,53 @@ Sherlock 支持三种颜色主题：
 }
 ```
 
-**OpenAI**
-```json
-{
-  "llm": {
-    "provider": "openai",
-    "api_key": "your-api-key",
-    "model": "gpt-4"
-  }
-}
-```
+**支持的 LLM 提供商：** Ollama（本地）、OpenAI、DeepSeek
 
-**DeepSeek**
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "api_key": "your-api-key",
-    "model": "deepseek-chat"
-  }
-}
-```
+### 📋 命令参考
 
-### 使用方法
+| 命令 | 说明 |
+|------|------|
+| `connect <主机>` | 连接主机（支持自然语言） |
+| `$<命令>` | 直接执行 shell 命令 |
+| `advisor` | AI 智能运维助手 |
+| `inspect [分组]` | 批量健康巡检 |
+| `playbook [run <名称>]` | 管理/执行自动化剧本 |
+| `dashboard` | 可视化资源仪表盘 |
+| `audit [stats]` | 操作审计日志 |
+| `quickfix` | AI 驱动的快速修复 |
+| `batch <命令>` | 多主机批量执行 |
+| `tunnel` | SSH 隧道管理 |
+| `snippet` | 命令模板管理 |
 
-#### 启动交互模式
-
-```bash
-sherlock
-```
-
-#### 查看已保存的主机
-
-```bash
-sherlock hosts
-```
-
-显示所有之前连接过的主机。然后可以使用 `connect <id>` 快速连接。
-
-#### 命令行选项
-
-```bash
-sherlock [选项] [命令]
-
-命令:
-  hosts                   显示所有已保存的主机
-
-选项:
-  -c, --config <路径>     配置文件路径
-  -v, --version           显示版本信息
-  -h, --help              显示帮助信息
-  --provider <提供商>     LLM 提供商 (ollama, openai, deepseek)
-  --model <模型>          模型名称
-  --base-url <URL>        LLM API 基础 URL
-  --api-key <密钥>        LLM 提供商的 API 密钥
-```
-
-#### 交互式命令
+### 📁 项目结构
 
 ```
-# 内置命令
-help                    显示帮助信息
-exit, quit, q           退出 Sherlock
-status                  显示当前状态
-disconnect              断开当前连接
-hosts                   显示所有已保存的主机
-history                 显示登录历史
-
-# 连接 (自然语言)
-连接到 192.168.1.100 用户名 root
-ssh user@example.com:2222
-以 admin 身份登录服务器 10.0.0.1 端口 2222
-connect 1               通过 ID 连接到已保存的主机
-
-# 主机 (自然语言)
-显示主机                 显示所有已保存的主机
-show my hosts           显示所有已保存的主机
-
-# 执行命令 (连接后)
-$ls -la                 直接执行命令
-查看磁盘使用情况        自然语言命令
-列出运行中的进程        自然语言命令
-
-# 交互式命令 (带 PTY 支持)
-$top                    系统监控，完整终端支持
-$htop                   交互式进程查看器
-$vim /etc/hosts         文本编辑器，完整终端支持
-$less /var/log/syslog   分页器，完整终端支持
-```
-
-**注意：** 像 `top`、`htop`、`vim`、`less` 等交互式命令会自动检测并以完整的 PTY（伪终端）支持运行，实现正确的显示和键盘交互。
-
-### 使用示例
-
-```
-$ sherlock
-sherlock> 连接到 192.168.1.100 用户名 root
-正在解析连接请求...
-正在连接 root@192.168.1.100:22...
-密码 (留空使用 SSH 密钥): ****
-成功连接到 root@192.168.1.100:22
-正在添加公钥到远程 authorized_keys...
-公钥添加成功，后续可使用密钥认证登录。
-
-sherlock[root@192.168.1.100:22]> 查看磁盘使用情况
-将要执行的命令:
-  1. df -h
-描述: 以人类可读格式显示磁盘空间使用情况
-
-$ df -h
-Filesystem      Size  Used Avail Use% Mounted on
-/dev/sda1        50G   20G   28G  42% /
-
-sherlock[root@192.168.1.100:22]> $uptime
- 14:30:01 up 45 days,  3:22,  2 users,  load average: 0.15, 0.10, 0.08
-
-sherlock[root@192.168.1.100:22]> exit
-再见！
-```
-
-### 项目结构
-
-```
-Sherlock/
-├── cmd/
-│   └── sherlock/          # 主 CLI 应用
+sherlock/
+├── cmd/sherlock/      # CLI 应用入口
 ├── internal/
-│   ├── agent/             # 自然语言处理 AI 代理
-│   ├── ai/                # LLM 客户端实现 (Ollama, OpenAI, DeepSeek)
-│   ├── config/            # 配置管理
-│   ├── history/           # 登录历史管理
-│   └── theme/             # 界面主题支持
-├── pkg/
-│   └── sshclient/         # SSH 客户端实现
-├── go.mod
-├── go.sum
-└── README.md
+│   ├── advisor/       # 🆕 AI 智能运维助手
+│   ├── agent/         # 自然语言处理
+│   ├── ai/            # LLM 客户端 (Ollama/OpenAI/DeepSeek)
+│   ├── analyzer/      # 输出分析与诊断
+│   ├── audit/         # 🆕 操作审计日志
+│   ├── batch/         # 批量操作
+│   ├── dashboard/     # 🆕 可视化仪表盘
+│   ├── healthcheck/   # 🆕 健康巡检
+│   ├── playbook/      # 🆕 自动化运维剧本
+│   ├── session/       # 多会话管理
+│   ├── tunnel/        # SSH 隧道
+│   └── ...
+└── pkg/sshclient/     # SSH 客户端实现
 ```
 
-### 环境要求
-
-- Go 1.18 或更高版本
-- LLM 提供商之一:
-  - 本地: [Ollama](https://ollama.ai/) 及兼容模型
-  - 云端: OpenAI API 密钥或 DeepSeek API 密钥
-
-### 开源协议
+### 📄 开源协议
 
 Apache License 2.0
 
 ---
 
-## ⭐ Star 趋势
-
-如果您觉得 Sherlock 对您有帮助，欢迎给我们一个 Star！您的支持是我们持续改进的动力。
-
-<a href="https://www.star-history.com/#warm3snow/sherlock&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=warm3snow/sherlock&type=Date" />
- </picture>
-</a>
-
-## 🤝 参与贡献
-
-欢迎贡献！您可以通过以下方式参与：
-
-- ⭐ 如果觉得有用，给项目点个 Star
-- 🐛 通过 [Issues](https://github.com/warm3snow/sherlock/issues) 报告 Bug 或提出新功能建议
-- 🔧 提交 Pull Request 帮助改进项目
-- 📖 完善项目文档
-
----
-
-<p align="center">用 ❤️ 制作 by <a href="https://github.com/warm3snow">warm3snow</a></p>
+<p align="center">
+  <a href="https://github.com/warm3snow/sherlock/stargazers">⭐ 给项目点个 Star</a> •
+  <a href="https://github.com/warm3snow/sherlock/issues">🐛 反馈问题</a> •
+  <a href="https://github.com/warm3snow/sherlock/pulls">🔧 参与贡献</a>
+</p>

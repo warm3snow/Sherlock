@@ -16,7 +16,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -491,6 +490,11 @@ func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
 func (a *App) connectToHost(host string, port int, user string) error {
 	fmt.Printf("%s %s@%s:%d...\n", a.theme.FormatInfo("Connecting to"), user, host, port)
 
+	// Store last host for reconnect feature
+	lastHost.host = host
+	lastHost.port = port
+	lastHost.user = user
+
 	hostInfo := &sshclient.HostInfo{
 		Host: host,
 		Port: port,
@@ -536,9 +540,11 @@ func (a *App) connectToHost(host string, port int, user string) error {
 	fmt.Println(a.theme.FormatInfo("Falling back to password authentication..."))
 
 	// Key auth failed, prompt for password
-	fmt.Print(a.theme.FormatInfo("Password (or press Enter to cancel): "))
-	reader := bufio.NewReader(os.Stdin)
-	password, _ := reader.ReadString('\n')
+	password, err := a.liner.Prompt(a.theme.FormatInfo("Password (or press Enter to cancel): "))
+	if err != nil {
+		fmt.Println(a.theme.FormatInfo("Connection cancelled."))
+		return nil
+	}
 	password = strings.TrimSpace(password)
 
 	if password == "" {
@@ -634,9 +640,11 @@ func (a *App) handleCommandRequest(input string) error {
 				fmt.Printf("%s %s\n", a.theme.FormatInfo(">"), a.theme.FormatCommand(cmd))
 			}
 		}
-		fmt.Print(a.theme.FormatWarning("⚠️  This operation may be dangerous. Continue? [y/N]: "))
-		reader := bufio.NewReader(os.Stdin)
-		confirm, _ := reader.ReadString('\n')
+		confirm, err := a.liner.Prompt(a.theme.FormatWarning("⚠️  This operation may be dangerous. Continue? [y/N]: "))
+		if err != nil {
+			fmt.Println(a.theme.FormatInfo("Operation cancelled."))
+			return nil
+		}
 		confirm = strings.TrimSpace(strings.ToLower(confirm))
 		if confirm != "y" && confirm != "yes" {
 			fmt.Println(a.theme.FormatInfo("Operation cancelled."))
@@ -1142,53 +1150,54 @@ For more information, visit: https://github.com/warm3snow/Sherlock
 
 func (a *App) printCommandHelp() {
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("General:"))
-	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("Show this help"))
-	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("exit, quit"), a.theme.FormatDescription("Exit Sherlock"))
-	fmt.Printf("  %s                      %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("Show status"))
-	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("list"), a.theme.FormatDescription("List all connections"))
+	fmt.Println(a.theme.FormatTableHeader("🎯 核心功能 (演示亮点):"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("advisor"), a.theme.FormatDescription("🤖 AI智能运维助手 - 主动发现问题并给出优化建议"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("inspect"), a.theme.FormatDescription("🏥 一键健康巡检 - 批量检查所有主机并生成报告"))
+	fmt.Printf("  %s             %s\n", a.theme.FormatCommand("quickfix"), a.theme.FormatDescription("⚡ 快速故障恢复 - AI诊断+一键修复"))
+	fmt.Printf("  %s             %s\n", a.theme.FormatCommand("playbook"), a.theme.FormatDescription("📜 自动化运维剧本 - 预定义操作一键执行"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("dashboard"), a.theme.FormatDescription("📊 可视化仪表盘 - 多主机状态总览"))
+	fmt.Printf("  %s                %s\n", a.theme.FormatCommand("audit"), a.theme.FormatDescription("📝 操作审计日志 - 完整追溯+合规报表"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("SSH Hosts (shortcuts: hl/ha/hr/hc):"))
-	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("host, hl"), a.theme.FormatDescription("List hosts"))
-	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("host add, ha <spec>"), a.theme.FormatDescription("Add host (user@host:port)"))
-	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("host delete, hr <id>"), a.theme.FormatDescription("Delete host"))
-	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("host connect, hc <id>"), a.theme.FormatDescription("Connect to host"))
+	fmt.Println(a.theme.FormatTableHeader("基础命令:"))
+	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("help"), a.theme.FormatDescription("显示帮助"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("exit, quit"), a.theme.FormatDescription("退出"))
+	fmt.Printf("  %s                      %s\n", a.theme.FormatCommand("status"), a.theme.FormatDescription("显示状态"))
+	fmt.Printf("  %s                        %s\n", a.theme.FormatCommand("list"), a.theme.FormatDescription("列出所有连接"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Database (shortcuts: dl/da/dr/dc):"))
-	fmt.Printf("  %s                   %s\n", a.theme.FormatCommand("db, dl"), a.theme.FormatDescription("List connections"))
-	fmt.Printf("  %s       %s\n", a.theme.FormatCommand("db add, da <spec>"), a.theme.FormatDescription("Add (user@host:port/db)"))
-	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("db delete, dr <id>"), a.theme.FormatDescription("Delete connection"))
-	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("db connect, dc <id>"), a.theme.FormatDescription("Connect to database"))
-	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("db exec <id> <sql>"), a.theme.FormatDescription("Execute SQL query"))
+	fmt.Println(a.theme.FormatTableHeader("主机管理 (快捷键: hl/ha/hr/hc):"))
+	fmt.Printf("  %s                 %s\n", a.theme.FormatCommand("host, hl"), a.theme.FormatDescription("列出主机"))
+	fmt.Printf("  %s               %s\n", a.theme.FormatCommand("hc <id>"), a.theme.FormatDescription("连接主机"))
+	fmt.Printf("  %s        %s\n", a.theme.FormatCommand("ha <user@host:port>"), a.theme.FormatDescription("添加主机"))
+	fmt.Printf("  %s               %s\n", a.theme.FormatCommand("hr <id>"), a.theme.FormatDescription("删除主机"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Cache (shortcuts: cl/ca/cr/cc):"))
-	fmt.Printf("  %s                %s\n", a.theme.FormatCommand("cache, cl"), a.theme.FormatDescription("List connections"))
-	fmt.Printf("  %s    %s\n", a.theme.FormatCommand("cache add, ca <spec>"), a.theme.FormatDescription("Add (host:port)"))
-	fmt.Printf("  %s %s\n", a.theme.FormatCommand("cache delete, cr <id>"), a.theme.FormatDescription("Delete connection"))
-	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("cache connect, cc <id>"), a.theme.FormatDescription("Connect to cache"))
-	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("cache exec <id> <cmd>"), a.theme.FormatDescription("Execute Redis command"))
+	fmt.Println(a.theme.FormatTableHeader("批量操作与文件传输:"))
+	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("batch <cmd> --group=<g>"), a.theme.FormatDescription("批量执行命令"))
+	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("upload <local> <remote>"), a.theme.FormatDescription("上传文件"))
+	fmt.Printf("  %s %s\n", a.theme.FormatCommand("download <remote> <local>"), a.theme.FormatDescription("下载文件"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Batch & Transfer:"))
-	fmt.Printf("  %s     %s\n", a.theme.FormatCommand("batch <cmd> --group=<g>"), a.theme.FormatDescription("Execute on group"))
-	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("upload <local> <remote>"), a.theme.FormatDescription("Upload file"))
-	fmt.Printf("  %s %s\n", a.theme.FormatCommand("download <remote> <local>"), a.theme.FormatDescription("Download file"))
+	fmt.Println(a.theme.FormatTableHeader("AI分析与诊断:"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("analyze <cmd>"), a.theme.FormatDescription("执行命令并AI分析输出"))
+	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("diagnose <cmd>"), a.theme.FormatDescription("诊断错误并建议修复"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Monitoring:"))
-	fmt.Printf("  %s                       %s\n", a.theme.FormatCommand("check"), a.theme.FormatDescription("Check host connectivity"))
-	fmt.Printf("  %s             %s\n", a.theme.FormatCommand("monitor <host>"), a.theme.FormatDescription("Show resource metrics"))
+	fmt.Println(a.theme.FormatTableHeader("其他功能:"))
+	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("db, cache"), a.theme.FormatDescription("数据库/缓存连接管理"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("snippet, snip"), a.theme.FormatDescription("命令片段管理"))
+	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("session, sess"), a.theme.FormatDescription("多会话管理"))
+	fmt.Printf("  %s              %s\n", a.theme.FormatCommand("tunnel, tun"), a.theme.FormatDescription("SSH隧道管理"))
+	fmt.Printf("  %s          %s\n", a.theme.FormatCommand("import ssh-config"), a.theme.FormatDescription("从SSH配置导入主机"))
 
 	fmt.Println()
-	fmt.Println(a.theme.FormatTableHeader("Commands:"))
-	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("Execute command directly"))
-	fmt.Printf("  %s\n", a.theme.FormatDescription("Or use natural language, e.g., \"show disk usage\""))
+	fmt.Println(a.theme.FormatTableHeader("命令执行:"))
+	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("直接执行命令"))
+	fmt.Printf("  %s\n", a.theme.FormatDescription("或使用自然语言，如 \"查看磁盘使用情况\""))
 
 	fmt.Println()
-	fmt.Printf("%s\n", a.theme.FormatInfo("Use '<cmd> help' for detailed usage of each command."))
+	fmt.Printf("%s\n", a.theme.FormatInfo("💡 演示建议: advisor -> inspect -> playbook run daily-inspect -> audit stats"))
 }
 
 // executeSherlockCommand executes a parsed sherlock internal command.

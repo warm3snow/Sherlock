@@ -605,6 +605,17 @@ func (c *Client) HostInfoString() string {
 	return fmt.Sprintf("%s@%s:%d", c.hostInfo.User, c.hostInfo.Host, c.hostInfo.Port)
 }
 
+// GetSSHClient returns the underlying SSH client for advanced operations.
+// This can be used for creating tunnels or other SSH-specific operations.
+func (c *Client) GetSSHClient() *ssh.Client {
+	return c.client
+}
+
+// GetHostInfo returns the host information for this connection.
+func (c *Client) GetHostInfo() *HostInfo {
+	return c.hostInfo
+}
+
 // GetDefaultKeyPaths returns all default SSH private key paths to try.
 func GetDefaultKeyPaths() []string {
 	homeDir, _ := os.UserHomeDir()
