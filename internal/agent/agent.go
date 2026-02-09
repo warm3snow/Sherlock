@@ -46,6 +46,21 @@ type Agent struct {
 	aiClient            ai.ModelClient
 	customShellCommands map[string]bool
 	machineContext      *MachineContext
+	memory              *ConversationMemory
+	enableMemory        bool
+	toolRegistry        *ToolRegistry
+	enableToolCalling   bool
+	predictor           *CommandPredictor
+	enablePrediction    bool
+}
+
+// AgentConfig holds configuration for the Agent.
+type AgentConfig struct {
+	EnableMemory      bool
+	MemoryConfig      *MemoryConfig
+	EnableToolCalling bool
+	EnablePrediction  bool
+	PredictorConfig   *PredictorConfig
 }
 
 // NewAgent creates a new Agent with the given AI client.
@@ -54,7 +69,120 @@ func NewAgent(aiClient ai.ModelClient) *Agent {
 		aiClient:            aiClient,
 		customShellCommands: make(map[string]bool),
 		machineContext:      detectLocalMachineContext(),
+		enableMemory:        false,
+		enableToolCalling:   false,
+		enablePrediction:    false,
 	}
+}
+
+// NewAgentWithConfig creates a new Agent with the given AI client and configuration.
+func NewAgentWithConfig(aiClient ai.ModelClient, db interface{}, cfg *AgentConfig) *Agent {
+	agent := &Agent{
+		aiClient:            aiClient,
+		customShellCommands: make(map[string]bool),
+		machineContext:      detectLocalMachineContext(),
+		enableMemory:        cfg != nil && cfg.EnableMemory,
+		enableToolCalling:   cfg != nil && cfg.EnableToolCalling,
+		enablePrediction:    cfg != nil && cfg.EnablePrediction,
+	}
+
+	// Initialize memory if enabled and database is available
+	if agent.enableMemory {
+		var memCfg *MemoryConfig
+		if cfg != nil && cfg.MemoryConfig != nil {
+			memCfg = cfg.MemoryConfig
+		}
+		// Type assert for sql.DB
+		if sqlDB, ok := db.(interface{ Exec(string, ...interface{}) (interface{}, error) }); ok {
+			_ = sqlDB // Use for memory initialization
+		}
+		// Create memory without persistence if db is not sql.DB
+		memory, err := NewConversationMemory(nil, memCfg)
+		if err == nil {
+			agent.memory = memory
+		}
+	}
+
+	// Initialize predictor if enabled
+	if agent.enablePrediction {
+		var predCfg *PredictorConfig
+		if cfg != nil && cfg.PredictorConfig != nil {
+			predCfg = cfg.PredictorConfig
+		}
+		agent.predictor = NewCommandPredictor(aiClient, predCfg)
+	}
+
+	return agent
+}
+
+// SetMemory sets the conversation memory for the agent.
+func (a *Agent) SetMemory(memory *ConversationMemory) {
+	a.memory = memory
+	a.enableMemory = memory != nil
+}
+
+// GetMemory returns the conversation memory.
+func (a *Agent) GetMemory() *ConversationMemory {
+	return a.memory
+}
+
+// EnableConversationMemory enables or disables conversation memory.
+func (a *Agent) EnableConversationMemory(enable bool) {
+	a.enableMemory = enable
+}
+
+// IsMemoryEnabled returns whether conversation memory is enabled.
+func (a *Agent) IsMemoryEnabled() bool {
+	return a.enableMemory && a.memory != nil
+}
+
+// SetToolRegistry sets the tool registry for AI tool calling.
+func (a *Agent) SetToolRegistry(registry *ToolRegistry) {
+	a.toolRegistry = registry
+}
+
+// GetToolRegistry returns the tool registry.
+func (a *Agent) GetToolRegistry() *ToolRegistry {
+	return a.toolRegistry
+}
+
+// EnableToolCalling enables or disables tool calling.
+func (a *Agent) EnableToolCalling(enable bool) {
+	a.enableToolCalling = enable
+}
+
+// IsToolCallingEnabled returns whether tool calling is enabled.
+func (a *Agent) IsToolCallingEnabled() bool {
+	return a.enableToolCalling && a.toolRegistry != nil
+}
+
+// SetPredictor sets the command predictor.
+func (a *Agent) SetPredictor(predictor *CommandPredictor) {
+	a.predictor = predictor
+	a.enablePrediction = predictor != nil
+}
+
+// GetPredictor returns the command predictor.
+func (a *Agent) GetPredictor() *CommandPredictor {
+	return a.predictor
+}
+
+// EnablePrediction enables or disables command prediction.
+func (a *Agent) EnablePrediction(enable bool) {
+	a.enablePrediction = enable
+}
+
+// IsPredictionEnabled returns whether command prediction is enabled.
+func (a *Agent) IsPredictionEnabled() bool {
+	return a.enablePrediction && a.predictor != nil
+}
+
+// GetPredictions returns predicted next commands.
+func (a *Agent) GetPredictions(ctx context.Context) ([]Prediction, error) {
+	if !a.enablePrediction || a.predictor == nil {
+		return nil, nil
+	}
+	return a.predictor.Predict(ctx)
 }
 
 // SetMachineContext sets the machine context for command generation.
@@ -638,6 +766,7 @@ func (a *Agent) parseCommandDirect(request string) *CommandInfo {
 // ParseCommandRequest parses a natural language command request using AI.
 // Only commands prefixed with '$' are executed directly without AI processing.
 // All other inputs are analyzed by AI with machine context awareness.
+// If conversation memory is enabled, it includes previous conversation context.
 func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*CommandInfo, error) {
 	// Check for direct command execution with $ prefix - bypass AI
 	if strings.HasPrefix(strings.TrimSpace(request), "$") {
@@ -650,11 +779,24 @@ func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*Comma
 		}, nil
 	}
 
-	// All other commands go through AI analysis with machine context
+	// Build system prompt with machine context
 	systemPrompt := a.buildSystemPromptCommand()
-	messages := []*schema.Message{
-		schema.SystemMessage(systemPrompt),
-		schema.UserMessage(request),
+
+	var messages []*schema.Message
+
+	// Use conversation memory if enabled
+	if a.enableMemory && a.memory != nil {
+		// Add user message to memory
+		a.memory.AddUserMessage(request)
+
+		// Get messages with context (includes system prompt and history)
+		messages = a.memory.GetMessagesWithContext(systemPrompt)
+	} else {
+		// Fallback to single-turn conversation
+		messages = []*schema.Message{
+			schema.SystemMessage(systemPrompt),
+			schema.UserMessage(request),
+		}
 	}
 
 	response, err := a.aiClient.Generate(ctx, messages)
@@ -663,6 +805,12 @@ func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*Comma
 	}
 
 	content := strings.TrimSpace(response.Content)
+
+	// Store assistant response in memory if enabled
+	if a.enableMemory && a.memory != nil {
+		a.memory.AddAssistantMessage(content)
+	}
+
 	content = extractJSON(content)
 
 	var info CommandInfo
@@ -675,6 +823,34 @@ func (a *Agent) ParseCommandRequest(ctx context.Context, request string) (*Comma
 	}
 
 	return &info, nil
+}
+
+// RecordCommandExecution records a command execution in the conversation memory.
+func (a *Agent) RecordCommandExecution(command, output string, exitCode int) {
+	if a.enableMemory && a.memory != nil {
+		a.memory.RecordCommand(command, output, exitCode)
+	}
+}
+
+// ClearConversation clears the current conversation memory.
+func (a *Agent) ClearConversation(keepCommandHistory bool) {
+	if a.memory != nil {
+		a.memory.Clear(keepCommandHistory)
+	}
+}
+
+// StartNewSession starts a new conversation session.
+func (a *Agent) StartNewSession(preserveContext bool) {
+	if a.memory != nil {
+		a.memory.NewSession(preserveContext)
+	}
+}
+
+// UpdateHostContext updates the host context in memory.
+func (a *Agent) UpdateHostContext(hostInfo string) {
+	if a.memory != nil {
+		a.memory.SetHostContext(hostInfo)
+	}
 }
 
 // extractJSON extracts JSON from a response that may contain markdown code blocks.

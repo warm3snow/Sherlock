@@ -123,6 +123,40 @@ type UIConfig struct {
 	Theme ThemeType `json:"theme,omitempty"`
 }
 
+// AIEnhancedConfig holds configuration for AI enhanced features.
+type AIEnhancedConfig struct {
+	// EnableMemory enables conversation memory for multi-turn dialogue.
+	EnableMemory bool `json:"enable_memory"`
+	// EnableProactiveAnalysis enables automatic analysis after command execution.
+	EnableProactiveAnalysis bool `json:"enable_proactive_analysis"`
+	// EnablePrediction enables command prediction suggestions.
+	EnablePrediction bool `json:"enable_prediction"`
+	// EnableToolCalling enables AI tool calling for autonomous operations.
+	EnableToolCalling bool `json:"enable_tool_calling"`
+	// MemoryWindowSize is the number of messages to keep in memory (default: 20).
+	MemoryWindowSize int `json:"memory_window_size,omitempty"`
+	// MaxCommandHistory is the number of commands to remember (default: 50).
+	MaxCommandHistory int `json:"max_command_history,omitempty"`
+	// AnalyzeOnError enables automatic analysis when commands fail.
+	AnalyzeOnError bool `json:"analyze_on_error"`
+	// AnalyzeOnWarning enables automatic analysis when warnings are detected.
+	AnalyzeOnWarning bool `json:"analyze_on_warning"`
+}
+
+// DefaultAIEnhancedConfig returns the default AI enhanced configuration.
+func DefaultAIEnhancedConfig() *AIEnhancedConfig {
+	return &AIEnhancedConfig{
+		EnableMemory:            true,
+		EnableProactiveAnalysis: true,
+		EnablePrediction:        true,
+		EnableToolCalling:       false, // Disabled by default for safety
+		MemoryWindowSize:        20,
+		MaxCommandHistory:       50,
+		AnalyzeOnError:          true,
+		AnalyzeOnWarning:        true,
+	}
+}
+
 // IsValidTheme checks if a theme name is valid.
 func IsValidTheme(name ThemeType) bool {
 	switch name {
@@ -143,6 +177,8 @@ type Config struct {
 	ShellCommands ShellCommandsConfig `json:"shell_commands,omitempty"`
 	// UI holds the UI configuration.
 	UI UIConfig `json:"ui,omitempty"`
+	// AIEnhanced holds the AI enhanced features configuration.
+	AIEnhanced AIEnhancedConfig `json:"ai_enhanced,omitempty"`
 }
 
 // DefaultConfig returns a default configuration.
@@ -163,6 +199,7 @@ func DefaultConfig() *Config {
 		ShellCommands: ShellCommandsConfig{
 			Whitelist: []string{"kubectl", "helm"},
 		},
+		AIEnhanced: *DefaultAIEnhancedConfig(),
 	}
 
 	// Auto-detect SSH keys from ~/.ssh/ directory

@@ -34,6 +34,7 @@ import (
 
 	"github.com/warm3snow/sherlock/internal/agent"
 	"github.com/warm3snow/sherlock/internal/ai"
+	"github.com/warm3snow/sherlock/internal/analyzer"
 	"github.com/warm3snow/sherlock/internal/cache"
 	"github.com/warm3snow/sherlock/internal/config"
 	"github.com/warm3snow/sherlock/internal/database"
@@ -73,6 +74,10 @@ type App struct {
 	cancel         context.CancelFunc
 	sigChan        chan os.Signal
 	liner          *liner.State
+
+	// AI Enhanced features
+	proactiveAnalyzer *analyzer.ProactiveAnalyzer
+	toolRegistry      *agent.ToolRegistry
 }
 
 func main() {
@@ -201,6 +206,9 @@ func main() {
 	if len(cfg.ShellCommands.Whitelist) > 0 {
 		app.agent.SetCustomShellCommands(cfg.ShellCommands.Whitelist)
 	}
+
+	// Initialize AI Enhanced features based on config
+	app.initAIEnhancedFeatures()
 
 	// Initialize history manager
 	historyMgr, err := history.NewManager()
@@ -524,6 +532,9 @@ func (a *App) connectToHost(host string, port int, user string) error {
 			// Detect remote machine context for AI command generation
 			a.detectRemoteMachineContext()
 
+			// Update AI contexts for the new host
+			a.updateAIContextForHost()
+
 			// Update history
 			if a.historyManager != nil {
 				_ = a.historyManager.AddRecord(host, port, user, true)
@@ -582,6 +593,9 @@ func (a *App) connectToHost(host string, port int, user string) error {
 
 	// Detect remote machine context for AI command generation
 	a.detectRemoteMachineContext()
+
+	// Update AI contexts for the new host
+	a.updateAIContextForHost()
 
 	// Optionally add public key to authorized_keys
 	pubKeyAdded := false
@@ -688,6 +702,10 @@ func (a *App) executeCommand(cmd string) error {
 	}
 
 	if result.Error != nil {
+		// Record command execution in memory and predictor before returning
+		a.recordCommandExecution(cmd, result)
+		// Run proactive analysis on error
+		a.runProactiveAnalysis(cmd, result)
 		return result.Error
 	}
 
@@ -695,7 +713,53 @@ func (a *App) executeCommand(cmd string) error {
 		fmt.Printf("(exit code: %d)\n", result.ExitCode)
 	}
 
+	// Record command execution in agent memory and predictor
+	a.recordCommandExecution(cmd, result)
+
+	// Run proactive analysis
+	a.runProactiveAnalysis(cmd, result)
+
 	return nil
+}
+
+// recordCommandExecution records a command execution in memory and predictor.
+func (a *App) recordCommandExecution(cmd string, result *sshclient.ExecuteResult) {
+	output := result.Stdout
+	if result.Stderr != "" {
+		if output != "" {
+			output += "\n"
+		}
+		output += result.Stderr
+	}
+
+	// Record in agent memory
+	a.agent.RecordCommandExecution(cmd, output, result.ExitCode)
+
+	// Record in predictor
+	if a.agent.IsPredictionEnabled() {
+		var hostCtx string
+		if a.sshClient != nil && a.sshClient.IsConnected() {
+			hostCtx = a.sshClient.HostInfoString()
+		} else {
+			hostCtx = "local"
+		}
+		a.agent.GetPredictor().RecordCommand(cmd, output, result.ExitCode, hostCtx)
+	}
+}
+
+// runProactiveAnalysis runs proactive analysis on command output.
+func (a *App) runProactiveAnalysis(cmd string, result *sshclient.ExecuteResult) {
+	if a.proactiveAnalyzer == nil || !a.proactiveAnalyzer.IsEnabled() {
+		return
+	}
+
+	proactiveResult := a.proactiveAnalyzer.AnalyzeCommandOutput(
+		a.ctx, cmd, result.Stdout, result.Stderr, result.ExitCode,
+	)
+
+	if proactiveResult != nil && proactiveResult.ShouldShow {
+		fmt.Print(analyzer.FormatProactiveResult(proactiveResult))
+	}
 }
 
 // executeInteractiveCommand executes an interactive command with PTY support.
@@ -812,6 +876,26 @@ func (a *App) showStatus() {
 	} else {
 		fmt.Printf("%s %s\n", a.theme.FormatInfo("Connected to:"), a.localClient.HostInfoString()+" (local)")
 	}
+
+	// AI Enhanced features status
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("=== AI Enhanced ==="))
+	cfg := &a.cfg.AIEnhanced
+	boolStatus := func(b bool) string {
+		if b {
+			return "✓ 已启用"
+		}
+		return "✗ 未启用"
+	}
+	fmt.Printf("%s %s\n", a.theme.FormatInfo("会话记忆:"), boolStatus(cfg.EnableMemory))
+	fmt.Printf("%s %s\n", a.theme.FormatInfo("主动分析:"), boolStatus(cfg.EnableProactiveAnalysis))
+	fmt.Printf("%s %s\n", a.theme.FormatInfo("命令预测:"), boolStatus(cfg.EnablePrediction))
+	fmt.Printf("%s %s\n", a.theme.FormatInfo("Tool Calling:"), boolStatus(cfg.EnableToolCalling))
+
+	if a.agent.IsMemoryEnabled() {
+		mem := a.agent.GetMemory()
+		fmt.Printf("%s 消息: %d, 命令: %d\n", a.theme.FormatInfo("  记忆状态:"), mem.MessageCount(), mem.CommandCount())
+	}
 }
 
 func (a *App) cleanup() {
@@ -825,6 +909,134 @@ func (a *App) cleanup() {
 		_ = a.historyManager.Close()
 	}
 	a.cancel()
+}
+
+// initAIEnhancedFeatures initializes AI enhanced features based on configuration.
+func (a *App) initAIEnhancedFeatures() {
+	cfg := &a.cfg.AIEnhanced
+
+	// Initialize conversation memory
+	if cfg.EnableMemory {
+		memCfg := &agent.MemoryConfig{
+			MaxMessages:       cfg.MemoryWindowSize,
+			MaxCommandHistory: cfg.MaxCommandHistory,
+			EnablePersistence: false, // Use in-memory for now
+		}
+		if memCfg.MaxMessages == 0 {
+			memCfg.MaxMessages = 20
+		}
+		if memCfg.MaxCommandHistory == 0 {
+			memCfg.MaxCommandHistory = 50
+		}
+		memory, err := agent.NewConversationMemory(nil, memCfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to initialize conversation memory: %v\n", err)
+		} else {
+			a.agent.SetMemory(memory)
+		}
+	}
+
+	// Initialize command predictor
+	if cfg.EnablePrediction {
+		predCfg := &agent.PredictorConfig{
+			MaxHistory:    cfg.MaxCommandHistory,
+			CacheValidFor: 30 * 1000000000, // 30 seconds in nanoseconds
+			Enabled:       true,
+		}
+		if predCfg.MaxHistory == 0 {
+			predCfg.MaxHistory = 20
+		}
+		predictor := agent.NewCommandPredictor(a.aiClient, predCfg)
+		a.agent.SetPredictor(predictor)
+	}
+
+	// Initialize proactive analyzer
+	if cfg.EnableProactiveAnalysis {
+		analyzerCfg := &analyzer.ProactiveAnalyzerConfig{
+			Enabled:          true,
+			AnalyzeOnError:   cfg.AnalyzeOnError,
+			AnalyzeOnWarning: cfg.AnalyzeOnWarning,
+		}
+		a.proactiveAnalyzer = analyzer.NewProactiveAnalyzer(a.aiClient, analyzerCfg)
+	}
+
+	// Initialize tool registry (only if tool calling is enabled)
+	if cfg.EnableToolCalling {
+		// Tool registry needs an SSH executor; set up with local client initially
+		a.toolRegistry = agent.NewToolRegistry(nil)
+		a.agent.SetToolRegistry(a.toolRegistry)
+		// Set confirmation function
+		a.toolRegistry.SetConfirmFunc(func(msg string) bool {
+			confirm, err := a.liner.Prompt(a.theme.FormatWarning(fmt.Sprintf("⚠️  AI wants to: %s. Allow? [y/N]: ", msg)))
+			if err != nil {
+				return false
+			}
+			confirm = strings.TrimSpace(strings.ToLower(confirm))
+			return confirm == "y" || confirm == "yes"
+		})
+	}
+
+	// Print AI enhanced features status
+	var enabledFeatures []string
+	if cfg.EnableMemory {
+		enabledFeatures = append(enabledFeatures, "会话记忆")
+	}
+	if cfg.EnableProactiveAnalysis {
+		enabledFeatures = append(enabledFeatures, "主动分析")
+	}
+	if cfg.EnablePrediction {
+		enabledFeatures = append(enabledFeatures, "命令预测")
+	}
+	if cfg.EnableToolCalling {
+		enabledFeatures = append(enabledFeatures, "Tool Calling")
+	}
+	if len(enabledFeatures) > 0 {
+		fmt.Printf("%s AI 增强: %s\n", a.theme.FormatInfo("🧠"), strings.Join(enabledFeatures, ", "))
+	}
+}
+
+// updateAIContextForHost updates AI-related contexts when connecting to a new host.
+func (a *App) updateAIContextForHost() {
+	hostInfo := ""
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		hostInfo = a.sshClient.HostInfoString()
+	}
+
+	// Update memory host context
+	a.agent.UpdateHostContext(hostInfo)
+
+	// Update tool registry executor with SSH client adapter
+	if a.toolRegistry != nil && a.sshClient != nil {
+		a.toolRegistry.SetExecutor(&sshClientAdapter{client: a.sshClient})
+	}
+
+	// Update predictor machine context
+	if a.agent.IsPredictionEnabled() && a.agent.GetMachineContext() != nil {
+		a.agent.GetPredictor().SetMachineContext(a.agent.GetMachineContext())
+	}
+}
+
+// sshClientAdapter adapts sshclient.Client to the agent.SSHExecutor interface.
+type sshClientAdapter struct {
+	client *sshclient.Client
+}
+
+func (a *sshClientAdapter) Execute(ctx context.Context, command string) *agent.ExecuteResult {
+	result := a.client.Execute(ctx, command)
+	return &agent.ExecuteResult{
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		ExitCode: result.ExitCode,
+		Error:    result.Error,
+	}
+}
+
+func (a *sshClientAdapter) IsConnected() bool {
+	return a.client.IsConnected()
+}
+
+func (a *sshClientAdapter) HostInfoString() string {
+	return a.client.HostInfoString()
 }
 
 // completer provides tab completion for commands and file paths.
@@ -1261,6 +1473,14 @@ func (a *App) printCommandHelp() {
 	fmt.Println(a.theme.FormatTableHeader("AI分析与诊断:"))
 	fmt.Printf("  %s            %s\n", a.theme.FormatCommand("analyze <cmd>"), a.theme.FormatDescription("执行命令并AI分析输出"))
 	fmt.Printf("  %s           %s\n", a.theme.FormatCommand("diagnose <cmd>"), a.theme.FormatDescription("诊断错误并建议修复"))
+
+	fmt.Println()
+	fmt.Println(a.theme.FormatTableHeader("🧠 AI 增强功能:"))
+	fmt.Printf("  %s      %s\n", a.theme.FormatCommand("predict, pred"), a.theme.FormatDescription("查看命令预测建议"))
+	fmt.Printf("  %s       %s\n", a.theme.FormatCommand("memory, mem"), a.theme.FormatDescription("会话记忆管理 (clear/new/history)"))
+	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("playbook generate"), a.theme.FormatDescription("AI 生成运维剧本"))
+	fmt.Printf("  %s  %s\n", a.theme.FormatCommand("playbook template"), a.theme.FormatDescription("查看可用剧本模板"))
+	fmt.Printf("  %s   %s\n", a.theme.FormatCommand("playbook improve"), a.theme.FormatDescription("AI 分析改进剧本"))
 
 	fmt.Println()
 	fmt.Println(a.theme.FormatTableHeader("其他功能:"))

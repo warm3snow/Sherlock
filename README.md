@@ -16,6 +16,7 @@ Sherlock is an AI-based remote operations tool built on SSH. Interact with remot
 |----------|----------|
 | **🗣️ Natural Language** | Describe tasks in plain English/Chinese, AI translates to shell commands |
 | **🤖 AI Operations** | Intelligent advisor, auto-diagnosis, one-click fixes, automated playbooks |
+| **🧠 AI Enhanced** | Multi-turn dialogue with memory, proactive analysis, command prediction, Tool Calling |
 | **📊 Visualization** | Terminal ASCII dashboard, multi-host status matrix, health scoring |
 | **⚡ Batch Operations** | Execute commands across multiple hosts with progress tracking |
 | **🔐 Security** | Auto SSH key management, encrypted credentials, operation audit logs |
@@ -36,7 +37,7 @@ Sherlock is an AI-based remote operations tool built on SSH. Interact with remot
 │  │                        Core Engine                              │        │
 │  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │        │
 │  │  │  Agent  │  │ Analyzer│  │  Batch  │  │ Monitor │           │        │
-│  │  │ (NLP)   │  │ (诊断)  │  │ (批量)  │  │ (监控)  │           │        │
+│  │  │(NLP+Mem)│  │(Proact.)│  │ (批量)  │  │ (监控)  │           │        │
 │  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘           │        │
 │  └───────┼────────────┼────────────┼────────────┼────────────────┘        │
 │          │            │            │            │                          │
@@ -79,6 +80,14 @@ sherlock> inspect              # Health inspection
 sherlock> playbook run daily-inspect  # Run playbook
 sherlock> dashboard            # Visual dashboard
 sherlock> audit stats          # Audit statistics
+
+# AI Enhanced Features
+sherlock> predict              # Get AI command predictions
+sherlock> memory status        # View conversation memory
+sherlock> memory clear         # Clear current session
+sherlock> playbook generate deploy a nginx service  # AI generate playbook
+sherlock> playbook template    # List playbook templates
+sherlock> playbook improve daily-inspect  # AI improve existing playbook
 ```
 
 ### ⚙️ Configuration
@@ -91,11 +100,31 @@ Create `~/.config/sherlock/config.json`:
     "provider": "ollama",
     "base_url": "http://localhost:11434",
     "model": "qwen2.5:7b"
+  },
+  "ai_enhanced": {
+    "enable_memory": true,
+    "enable_proactive_analysis": true,
+    "enable_prediction": true,
+    "enable_tool_calling": false,
+    "memory_window_size": 20,
+    "max_command_history": 100,
+    "analyze_on_error": true,
+    "analyze_on_warning": true
   }
 }
 ```
 
 **Supported LLM Providers:** Ollama (local), OpenAI, DeepSeek
+
+**AI Enhanced Config:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enable_memory` | `true` | Multi-turn dialogue with session memory |
+| `enable_proactive_analysis` | `true` | Auto-analyze command output on errors |
+| `enable_prediction` | `true` | Command intent prediction |
+| `enable_tool_calling` | `false` | Allow AI to call SSH tools autonomously |
+| `memory_window_size` | `20` | Sliding window size (messages) |
 
 ### 📋 Commands Reference
 
@@ -112,6 +141,11 @@ Create `~/.config/sherlock/config.json`:
 | `batch <cmd>` | Execute on multiple hosts |
 | `tunnel` | SSH tunnel management |
 | `snippet` | Command template management |
+| `predict` | AI command intent prediction |
+| `memory [status\|clear\|new\|history]` | Conversation memory management |
+| `playbook generate <desc>` | AI generate playbook from description |
+| `playbook template` | List predefined playbook templates |
+| `playbook improve <name>` | AI suggest improvements for playbook |
 
 ### 📁 Project Structure
 
@@ -120,9 +154,9 @@ sherlock/
 ├── cmd/sherlock/      # CLI application
 ├── internal/
 │   ├── advisor/       # 🆕 AI intelligent advisor
-│   ├── agent/         # Natural language processing
+│   ├── agent/         # NLP + Memory + Predictor + Tool Calling
 │   ├── ai/            # LLM client (Ollama/OpenAI/DeepSeek)
-│   ├── analyzer/      # Output analysis & diagnosis
+│   ├── analyzer/      # Output analysis & proactive diagnosis
 │   ├── audit/         # 🆕 Operation audit logs
 │   ├── batch/         # Batch operations
 │   ├── dashboard/     # 🆕 Visual dashboard

@@ -495,3 +495,209 @@ func FormatSessionSummary(summary *SessionSummary) string {
 
 	return sb.String()
 }
+
+// ProactiveAnalyzer provides intelligent proactive analysis after command execution.
+type ProactiveAnalyzer struct {
+	analyzer *Analyzer
+	enabled  bool
+
+	// Configuration options
+	analyzeOnError      bool // Always analyze when command fails
+	analyzeOnWarning    bool // Analyze when output contains warning keywords
+	analyzeOnLargeOutput bool // Analyze when output is large
+	minOutputForAnalysis int  // Minimum output length to trigger analysis
+}
+
+// ProactiveAnalyzerConfig holds configuration for proactive analysis.
+type ProactiveAnalyzerConfig struct {
+	Enabled              bool `json:"enabled"`
+	AnalyzeOnError       bool `json:"analyze_on_error"`
+	AnalyzeOnWarning     bool `json:"analyze_on_warning"`
+	AnalyzeOnLargeOutput bool `json:"analyze_on_large_output"`
+	MinOutputForAnalysis int  `json:"min_output_for_analysis"`
+}
+
+// DefaultProactiveAnalyzerConfig returns the default configuration.
+func DefaultProactiveAnalyzerConfig() *ProactiveAnalyzerConfig {
+	return &ProactiveAnalyzerConfig{
+		Enabled:              true,
+		AnalyzeOnError:       true,
+		AnalyzeOnWarning:     true,
+		AnalyzeOnLargeOutput: false,
+		MinOutputForAnalysis: 1000,
+	}
+}
+
+// NewProactiveAnalyzer creates a new proactive analyzer.
+func NewProactiveAnalyzer(client ai.ModelClient, config *ProactiveAnalyzerConfig) *ProactiveAnalyzer {
+	if config == nil {
+		config = DefaultProactiveAnalyzerConfig()
+	}
+
+	return &ProactiveAnalyzer{
+		analyzer:             NewAnalyzer(client),
+		enabled:              config.Enabled,
+		analyzeOnError:       config.AnalyzeOnError,
+		analyzeOnWarning:     config.AnalyzeOnWarning,
+		analyzeOnLargeOutput: config.AnalyzeOnLargeOutput,
+		minOutputForAnalysis: config.MinOutputForAnalysis,
+	}
+}
+
+// ProactiveResult represents the result of proactive analysis.
+type ProactiveResult struct {
+	ShouldShow    bool             `json:"should_show"`    // Whether to show this result to user
+	Trigger       string           `json:"trigger"`        // What triggered the analysis (error, warning, large_output)
+	Analysis      *AnalysisResult  `json:"analysis,omitempty"`
+	Diagnosis     *DiagnosisResult `json:"diagnosis,omitempty"`
+	QuickSuggestion string         `json:"quick_suggestion,omitempty"` // One-liner suggestion
+}
+
+// AnalyzeCommandOutput performs proactive analysis on command output.
+// It returns nil if no analysis is needed.
+func (pa *ProactiveAnalyzer) AnalyzeCommandOutput(ctx context.Context, command, stdout, stderr string, exitCode int) *ProactiveResult {
+	if !pa.enabled {
+		return nil
+	}
+
+	// Combine output for analysis
+	output := stdout
+	if stderr != "" {
+		output = stdout + "\n" + stderr
+	}
+
+	// Check if analysis is needed
+	trigger := pa.shouldAnalyze(command, output, exitCode)
+	if trigger == "" {
+		return nil
+	}
+
+	result := &ProactiveResult{
+		ShouldShow: true,
+		Trigger:    trigger,
+	}
+
+	// For errors, provide diagnosis
+	if trigger == "error" && exitCode != 0 {
+		diagnosis, err := pa.analyzer.DiagnoseError(ctx, command, stderr, exitCode)
+		if err == nil && diagnosis != nil {
+			result.Diagnosis = diagnosis
+			result.QuickSuggestion = pa.buildQuickSuggestion(diagnosis)
+		}
+		return result
+	}
+
+	// For warnings and large output, provide analysis
+	analysis, err := pa.analyzer.AnalyzeOutput(ctx, command, output, exitCode)
+	if err == nil && analysis != nil {
+		result.Analysis = analysis
+		if len(analysis.Suggestions) > 0 {
+			result.QuickSuggestion = analysis.Suggestions[0]
+		}
+	}
+
+	return result
+}
+
+// shouldAnalyze determines if analysis should be performed.
+func (pa *ProactiveAnalyzer) shouldAnalyze(command, output string, exitCode int) string {
+	// Always analyze on error
+	if pa.analyzeOnError && exitCode != 0 {
+		return "error"
+	}
+
+	// Check for warning keywords
+	if pa.analyzeOnWarning && containsWarningKeywords(output) {
+		return "warning"
+	}
+
+	// Check for large output
+	if pa.analyzeOnLargeOutput && len(output) >= pa.minOutputForAnalysis {
+		return "large_output"
+	}
+
+	return ""
+}
+
+// containsWarningKeywords checks if output contains warning-related keywords.
+func containsWarningKeywords(output string) bool {
+	lower := strings.ToLower(output)
+	warningKeywords := []string{
+		"warning", "warn", "deprecated", "error", "failed", "failure",
+		"critical", "危险", "警告", "错误", "失败",
+		"disk full", "no space", "out of memory", "permission denied",
+		"connection refused", "timeout", "timed out",
+	}
+
+	for _, keyword := range warningKeywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// buildQuickSuggestion creates a one-liner suggestion from diagnosis.
+func (pa *ProactiveAnalyzer) buildQuickSuggestion(diagnosis *DiagnosisResult) string {
+	if diagnosis == nil {
+		return ""
+	}
+
+	if len(diagnosis.FixCommands) > 0 {
+		return fmt.Sprintf("Try: %s", diagnosis.FixCommands[0])
+	}
+
+	return diagnosis.RootCause
+}
+
+// SetEnabled enables or disables proactive analysis.
+func (pa *ProactiveAnalyzer) SetEnabled(enabled bool) {
+	pa.enabled = enabled
+}
+
+// IsEnabled returns whether proactive analysis is enabled.
+func (pa *ProactiveAnalyzer) IsEnabled() bool {
+	return pa.enabled
+}
+
+// GetAnalyzer returns the underlying analyzer.
+func (pa *ProactiveAnalyzer) GetAnalyzer() *Analyzer {
+	return pa.analyzer
+}
+
+// FormatProactiveResult formats the proactive analysis result for display.
+func FormatProactiveResult(result *ProactiveResult) string {
+	if result == nil || !result.ShouldShow {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	switch result.Trigger {
+	case "error":
+		sb.WriteString("\n🔴 ")
+		sb.WriteString("AI 检测到错误，正在分析...\n")
+		if result.Diagnosis != nil {
+			sb.WriteString(FormatDiagnosisResult(result.Diagnosis))
+		}
+	case "warning":
+		sb.WriteString("\n🟡 ")
+		sb.WriteString("AI 检测到警告信息\n")
+		if result.Analysis != nil {
+			sb.WriteString(FormatAnalysisResult(result.Analysis))
+		}
+	case "large_output":
+		sb.WriteString("\n📊 ")
+		sb.WriteString("AI 输出分析\n")
+		if result.Analysis != nil {
+			sb.WriteString(FormatAnalysisResult(result.Analysis))
+		}
+	}
+
+	if result.QuickSuggestion != "" {
+		sb.WriteString(fmt.Sprintf("\n💡 快速建议: %s\n", result.QuickSuggestion))
+	}
+
+	return sb.String()
+}
