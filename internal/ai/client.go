@@ -47,14 +47,24 @@ type Client struct {
 
 // NewClient creates a new AI client based on the configuration.
 func NewClient(ctx context.Context, cfg *config.LLMConfig) (ModelClient, error) {
+	// Apply provider presets if BaseURL is not specified
+	if cfg.BaseURL == "" {
+		if preset, ok := config.ProviderPresets[cfg.Provider]; ok {
+			cfg.BaseURL = preset.BaseURL
+		}
+	}
+
 	switch cfg.Provider {
 	case config.ProviderOllama:
 		return newOllamaClient(ctx, cfg)
-	case config.ProviderOpenAI, config.ProviderOpenAICompatible:
-		// OpenAI Compatible provider reuses the OpenAI client implementation
-		return newOpenAIClient(ctx, cfg)
 	case config.ProviderDeepSeek:
 		return newDeepSeekClient(ctx, cfg)
+	case config.ProviderOpenAI, config.ProviderOpenAICompatible,
+		config.ProviderQwen, config.ProviderMoonshot, config.ProviderZhipu,
+		config.ProviderBaichuan, config.ProviderMinimax, config.ProviderYi,
+		config.ProviderGroq, config.ProviderTogether:
+		// All OpenAI-compatible providers use the same client
+		return newOpenAIClient(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", cfg.Provider)
 	}

@@ -71,9 +71,71 @@ const (
 	ProviderOpenAI LLMProviderType = "openai"
 	// ProviderDeepSeek represents DeepSeek API.
 	ProviderDeepSeek LLMProviderType = "deepseek"
-	// ProviderOpenAICompatible represents any OpenAI-compatible API (Claude, Qwen, Moonshot, etc.).
+	// ProviderOpenAICompatible represents any OpenAI-compatible API.
 	ProviderOpenAICompatible LLMProviderType = "openai_compatible"
+	// ProviderQwen represents Alibaba Qwen (Tongyi Qianwen) API.
+	ProviderQwen LLMProviderType = "qwen"
+	// ProviderMoonshot represents Moonshot (Kimi) API.
+	ProviderMoonshot LLMProviderType = "moonshot"
+	// ProviderZhipu represents Zhipu (GLM) API.
+	ProviderZhipu LLMProviderType = "zhipu"
+	// ProviderBaichuan represents Baichuan API.
+	ProviderBaichuan LLMProviderType = "baichuan"
+	// ProviderMinimax represents Minimax API.
+	ProviderMinimax LLMProviderType = "minimax"
+	// ProviderYi represents 01.AI (Yi) API.
+	ProviderYi LLMProviderType = "yi"
+	// ProviderGroq represents Groq API.
+	ProviderGroq LLMProviderType = "groq"
+	// ProviderTogether represents Together.ai API.
+	ProviderTogether LLMProviderType = "together"
 )
+
+// ProviderPresets contains default configurations for known providers.
+var ProviderPresets = map[LLMProviderType]struct {
+	BaseURL string
+	Model   string
+}{
+	ProviderOllama:   {BaseURL: "http://localhost:11434", Model: "qwen2.5:latest"},
+	ProviderOpenAI:   {BaseURL: "https://api.openai.com/v1", Model: "gpt-4o"},
+	ProviderDeepSeek: {BaseURL: "https://api.deepseek.com", Model: "deepseek-chat"},
+	ProviderQwen:     {BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Model: "qwen-plus"},
+	ProviderMoonshot: {BaseURL: "https://api.moonshot.cn/v1", Model: "moonshot-v1-8k"},
+	ProviderZhipu:    {BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-4"},
+	ProviderBaichuan: {BaseURL: "https://api.baichuan-ai.com/v1", Model: "Baichuan4"},
+	ProviderMinimax:  {BaseURL: "https://api.minimax.chat/v1", Model: "abab6.5s-chat"},
+	ProviderYi:       {BaseURL: "https://api.lingyiwanwu.com/v1", Model: "yi-large"},
+	ProviderGroq:     {BaseURL: "https://api.groq.com/openai/v1", Model: "llama-3.1-70b-versatile"},
+	ProviderTogether: {BaseURL: "https://api.together.xyz/v1", Model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"},
+}
+
+// GetSupportedProviders returns a list of all supported LLM providers.
+func GetSupportedProviders() []LLMProviderType {
+	return []LLMProviderType{
+		ProviderOllama,
+		ProviderOpenAI,
+		ProviderDeepSeek,
+		ProviderQwen,
+		ProviderMoonshot,
+		ProviderZhipu,
+		ProviderBaichuan,
+		ProviderMinimax,
+		ProviderYi,
+		ProviderGroq,
+		ProviderTogether,
+		ProviderOpenAICompatible,
+	}
+}
+
+// GetProviderInfo returns information about a provider.
+func GetProviderInfo(provider LLMProviderType) (baseURL, defaultModel string, requiresAPIKey bool) {
+	if preset, ok := ProviderPresets[provider]; ok {
+		baseURL = preset.BaseURL
+		defaultModel = preset.Model
+	}
+	requiresAPIKey = provider != ProviderOllama
+	return
+}
 
 // LLMConfig holds LLM provider configuration.
 type LLMConfig struct {
@@ -220,13 +282,15 @@ func (c *Config) Validate() error {
 		return errors.New("LLM model is required")
 	}
 	switch c.LLM.Provider {
-	case ProviderOpenAI, ProviderDeepSeek, ProviderOpenAICompatible:
-		if c.LLM.APIKey == "" {
-			return fmt.Errorf("API key is required for provider %s", c.LLM.Provider)
-		}
 	case ProviderOllama:
 		if c.LLM.BaseURL == "" {
 			return errors.New("base URL is required for Ollama provider")
+		}
+	case ProviderOpenAI, ProviderDeepSeek, ProviderOpenAICompatible,
+		ProviderQwen, ProviderMoonshot, ProviderZhipu, ProviderBaichuan,
+		ProviderMinimax, ProviderYi, ProviderGroq, ProviderTogether:
+		if c.LLM.APIKey == "" {
+			return fmt.Errorf("API key is required for provider %s", c.LLM.Provider)
 		}
 	default:
 		return fmt.Errorf("unsupported LLM provider: %s", c.LLM.Provider)

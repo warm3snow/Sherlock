@@ -15,6 +15,7 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/callbacks"
@@ -32,7 +34,8 @@ import (
 )
 
 const (
-	defaultDeepSeekBaseURL = "https://api.deepseek.com/v1"
+	// DeepSeek API base URL (without /v1 suffix, will be added automatically)
+	defaultDeepSeekBaseURL = "https://api.deepseek.com"
 )
 
 // DeepSeekConfig stores configuration for DeepSeek client.
@@ -276,7 +279,7 @@ func (m *DeepSeekChatModel) doRequest(ctx context.Context, req *deepSeekChatRequ
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	apiURL := m.config.BaseURL + "/chat/completions"
+	apiURL := m.config.BaseURL + "/v1/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -292,7 +295,8 @@ func (m *DeepSeekChatModel) doRequest(ctx context.Context, req *deepSeekChatRequ
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	var chatResp deepSeekChatResponse
@@ -309,7 +313,7 @@ func (m *DeepSeekChatModel) doStreamRequest(ctx context.Context, req *deepSeekCh
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	apiURL := m.config.BaseURL + "/chat/completions"
+	apiURL := m.config.BaseURL + "/v1/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -317,6 +321,7 @@ func (m *DeepSeekChatModel) doStreamRequest(ctx context.Context, req *deepSeekCh
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+m.config.APIKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
 
 	resp, err := m.httpClient.Do(httpReq)
 	if err != nil {
@@ -325,22 +330,43 @@ func (m *DeepSeekChatModel) doStreamRequest(ctx context.Context, req *deepSeekCh
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	decoder := json.NewDecoder(resp.Body)
-	for {
-		var chatResp deepSeekStreamResponse
-		if err := decoder.Decode(&chatResp); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("failed to decode response: %w", err)
+	// Parse SSE stream
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
 		}
 
-		if err := handler(&chatResp); err != nil {
-			return err
+		// Parse SSE data line
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Check for stream end
+			if data == "[DONE]" {
+				break
+			}
+
+			var chatResp deepSeekStreamResponse
+			if err := json.Unmarshal([]byte(data), &chatResp); err != nil {
+				// Skip malformed JSON lines
+				continue
+			}
+
+			if err := handler(&chatResp); err != nil {
+				return err
+			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading stream: %w", err)
 	}
 
 	return nil
