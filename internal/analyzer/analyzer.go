@@ -217,23 +217,25 @@ func (a *Analyzer) SummarizeSession(ctx context.Context, commands []string, host
 }
 
 func (a *Analyzer) quickAnalyze(command, output string, exitCode int) *AnalysisResult {
+	// Always use AI analysis for the analyze command
+	// Only use quick analysis for specific commands with well-known output formats
 	lower := strings.ToLower(command)
 
-	if strings.Contains(lower, "df") {
-		return analyzeDiskUsage(output)
-	}
-
-	if strings.Contains(lower, "free") {
-		return analyzeMemoryUsage(output)
-	}
-
-	if exitCode == 0 && len(output) < 500 {
-		return &AnalysisResult{
-			Summary: "Command completed successfully",
-			Status:  "ok",
+	// df command has structured output we can parse directly
+	if strings.HasPrefix(lower, "df ") || lower == "df" {
+		if result := analyzeDiskUsage(output); result != nil && result.Status != "ok" {
+			return result // Only return quick result if there's an issue to report
 		}
 	}
 
+	// free command has structured output we can parse directly
+	if strings.HasPrefix(lower, "free ") || lower == "free" {
+		if result := analyzeMemoryUsage(output); result != nil && result.Status != "ok" {
+			return result // Only return quick result if there's an issue to report
+		}
+	}
+
+	// For all other cases, let AI do the analysis
 	return nil
 }
 
