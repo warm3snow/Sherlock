@@ -94,67 +94,12 @@ sherlock> playbook improve daily-inspect  # AI improve existing playbook
 
 Create `~/.config/sherlock/config.json`:
 
-#### Ollama (Local, No API Key Required)
 ```json
 {
   "llm": {
     "provider": "ollama",
     "base_url": "http://localhost:11434",
     "model": "qwen2.5:7b"
-  }
-}
-```
-
-#### DeepSeek
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "api_key": "sk-your-deepseek-api-key",
-    "model": "deepseek-chat"
-  }
-}
-```
-
-#### OpenAI
-```json
-{
-  "llm": {
-    "provider": "openai",
-    "api_key": "sk-your-openai-api-key",
-    "model": "gpt-4o"
-  }
-}
-```
-
-#### Other Providers (Qwen, Moonshot, Zhipu, etc.)
-```json
-{
-  "llm": {
-    "provider": "qwen",
-    "api_key": "your-api-key",
-    "model": "qwen-plus"
-  }
-}
-```
-
-#### Full Configuration Example
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "api_key": "sk-your-api-key",
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-chat",
-    "temperature": 0.7
-  },
-  "ssh_key": {
-    "private_key_path": "~/.ssh/id_ed25519",
-    "public_key_path": "~/.ssh/id_ed25519.pub",
-    "auto_add_to_remote": true
-  },
-  "ui": {
-    "theme": "dracula"
   },
   "ai_enhanced": {
     "enable_memory": true,
@@ -169,19 +114,7 @@ Create `~/.config/sherlock/config.json`:
 }
 ```
 
-**Supported LLM Providers:**
-
-| Provider | API Key Required | Default Model | Base URL |
-|----------|-----------------|---------------|----------|
-| `ollama` | ❌ No | `qwen2.5:latest` | `http://localhost:11434` |
-| `deepseek` | ✅ Yes | `deepseek-chat` | `https://api.deepseek.com` |
-| `openai` | ✅ Yes | `gpt-4o` | `https://api.openai.com/v1` |
-| `qwen` | ✅ Yes | `qwen-plus` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `moonshot` | ✅ Yes | `moonshot-v1-8k` | `https://api.moonshot.cn/v1` |
-| `zhipu` | ✅ Yes | `glm-4` | `https://open.bigmodel.cn/api/paas/v4` |
-| `groq` | ✅ Yes | `llama-3.1-70b-versatile` | `https://api.groq.com/openai/v1` |
-| `together` | ✅ Yes | `Meta-Llama-3.1-70B` | `https://api.together.xyz/v1` |
-| `openai_compatible` | ✅ Yes | (custom) | (custom) |
+**Supported LLM Providers:** Ollama (local), OpenAI, DeepSeek
 
 **AI Enhanced Config:**
 

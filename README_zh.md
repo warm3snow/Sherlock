@@ -94,67 +94,12 @@ sherlock> playbook improve daily-inspect  # AI 优化已有剧本
 
 创建配置文件 `~/.config/sherlock/config.json`：
 
-#### Ollama（本地部署，无需 API Key）
 ```json
 {
   "llm": {
     "provider": "ollama",
     "base_url": "http://localhost:11434",
     "model": "qwen2.5:7b"
-  }
-}
-```
-
-#### DeepSeek
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "api_key": "sk-your-deepseek-api-key",
-    "model": "deepseek-chat"
-  }
-}
-```
-
-#### OpenAI
-```json
-{
-  "llm": {
-    "provider": "openai",
-    "api_key": "sk-your-openai-api-key",
-    "model": "gpt-4o"
-  }
-}
-```
-
-#### 其他国产大模型（通义千问、Moonshot、智谱等）
-```json
-{
-  "llm": {
-    "provider": "qwen",
-    "api_key": "your-api-key",
-    "model": "qwen-plus"
-  }
-}
-```
-
-#### 完整配置示例
-```json
-{
-  "llm": {
-    "provider": "deepseek",
-    "api_key": "sk-your-api-key",
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-chat",
-    "temperature": 0.7
-  },
-  "ssh_key": {
-    "private_key_path": "~/.ssh/id_ed25519",
-    "public_key_path": "~/.ssh/id_ed25519.pub",
-    "auto_add_to_remote": true
-  },
-  "ui": {
-    "theme": "dracula"
   },
   "ai_enhanced": {
     "enable_memory": true,
@@ -169,22 +114,7 @@ sherlock> playbook improve daily-inspect  # AI 优化已有剧本
 }
 ```
 
-**支持的 LLM 提供商：**
-
-| 提供商 | 需要 API Key | 默认模型 | API 地址 |
-|--------|-------------|----------|----------|
-| `ollama` | ❌ 否 | `qwen2.5:latest` | `http://localhost:11434` |
-| `deepseek` | ✅ 是 | `deepseek-chat` | `https://api.deepseek.com` |
-| `openai` | ✅ 是 | `gpt-4o` | `https://api.openai.com/v1` |
-| `qwen` | ✅ 是 | `qwen-plus` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `moonshot` | ✅ 是 | `moonshot-v1-8k` | `https://api.moonshot.cn/v1` |
-| `zhipu` | ✅ 是 | `glm-4` | `https://open.bigmodel.cn/api/paas/v4` |
-| `baichuan` | ✅ 是 | `Baichuan4` | `https://api.baichuan-ai.com/v1` |
-| `minimax` | ✅ 是 | `abab6.5s-chat` | `https://api.minimax.chat/v1` |
-| `yi` | ✅ 是 | `yi-large` | `https://api.lingyiwanwu.com/v1` |
-| `groq` | ✅ 是 | `llama-3.1-70b-versatile` | `https://api.groq.com/openai/v1` |
-| `together` | ✅ 是 | `Meta-Llama-3.1-70B` | `https://api.together.xyz/v1` |
-| `openai_compatible` | ✅ 是 | (自定义) | (自定义) |
+**支持的 LLM 提供商：** Ollama（本地）、OpenAI、DeepSeek
 
 **AI 增强配置项：**
 

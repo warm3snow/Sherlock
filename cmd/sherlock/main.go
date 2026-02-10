@@ -553,13 +553,15 @@ func (a *App) connectToHost(host string, port int, user string) error {
 	}
 	fmt.Println(a.theme.FormatInfo("Falling back to password authentication..."))
 
-	// Key auth failed, prompt for password
-	password, err := a.liner.Prompt(a.theme.FormatInfo("Password (or press Enter to cancel): "))
+	// Key auth failed, prompt for password (use secure password input)
+	fmt.Print(a.theme.FormatInfo("Password (or press Enter to cancel): "))
+	pwBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println() // Add newline after password input
 	if err != nil {
-		fmt.Println(a.theme.FormatInfo("Connection cancelled."))
+		fmt.Printf("%s %v\n", a.theme.FormatWarning("Failed to read password:"), err)
 		return nil
 	}
-	password = strings.TrimSpace(password)
+	password := strings.TrimSpace(string(pwBytes))
 
 	if password == "" {
 		fmt.Println(a.theme.FormatInfo("Connection cancelled."))
