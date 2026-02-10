@@ -125,6 +125,20 @@ func (t *FileTransfer) Upload(ctx context.Context, localPath, remotePath string,
 		return result, result.Error
 	}
 
+	// If remotePath is a directory (ends with / or is an existing directory), append local filename
+	if !localInfo.IsDir() {
+		if strings.HasSuffix(remotePath, "/") {
+			// User explicitly specified a directory
+			remotePath = filepath.Join(remotePath, filepath.Base(localPath))
+		} else {
+			// Check if remote path is an existing directory
+			if remoteInfo, err := t.sftp.Stat(remotePath); err == nil && remoteInfo.IsDir() {
+				remotePath = filepath.Join(remotePath, filepath.Base(localPath))
+			}
+		}
+		result.Destination = remotePath
+	}
+
 	if localInfo.IsDir() {
 		if !opts.Recursive {
 			result.Error = errors.New("cannot upload directory without recursive option")
@@ -159,6 +173,20 @@ func (t *FileTransfer) Download(ctx context.Context, remotePath, localPath strin
 		result.Error = fmt.Errorf("remote path not found: %w", err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
+	}
+
+	// If localPath is a directory (ends with / or is an existing directory), append remote filename
+	if !remoteInfo.IsDir() {
+		if strings.HasSuffix(localPath, "/") || strings.HasSuffix(localPath, string(os.PathSeparator)) {
+			// User explicitly specified a directory
+			localPath = filepath.Join(localPath, filepath.Base(remotePath))
+		} else {
+			// Check if local path is an existing directory
+			if localInfo, err := os.Stat(localPath); err == nil && localInfo.IsDir() {
+				localPath = filepath.Join(localPath, filepath.Base(remotePath))
+			}
+		}
+		result.Destination = localPath
 	}
 
 	if remoteInfo.IsDir() {

@@ -522,7 +522,7 @@ func DefaultProactiveAnalyzerConfig() *ProactiveAnalyzerConfig {
 	return &ProactiveAnalyzerConfig{
 		Enabled:              true,
 		AnalyzeOnError:       true,
-		AnalyzeOnWarning:     true,
+		AnalyzeOnWarning:     false, // Disabled by default to avoid false positives
 		AnalyzeOnLargeOutput: false,
 		MinOutputForAnalysis: 1000,
 	}

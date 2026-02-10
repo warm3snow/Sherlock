@@ -215,7 +215,7 @@ func DefaultAIEnhancedConfig() *AIEnhancedConfig {
 		MemoryWindowSize:        20,
 		MaxCommandHistory:       50,
 		AnalyzeOnError:          true,
-		AnalyzeOnWarning:        true,
+		AnalyzeOnWarning:        false, // Disabled by default to avoid false positives
 	}
 }
 

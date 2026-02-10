@@ -39,6 +39,7 @@ import (
 	"github.com/warm3snow/sherlock/internal/config"
 	"github.com/warm3snow/sherlock/internal/database"
 	"github.com/warm3snow/sherlock/internal/history"
+	"github.com/warm3snow/sherlock/internal/hosts"
 	"github.com/warm3snow/sherlock/internal/theme"
 	"github.com/warm3snow/sherlock/pkg/sshclient"
 )
@@ -165,7 +166,11 @@ func main() {
 	defer cancel()
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Only listen for SIGTERM for graceful shutdown
+	signal.Notify(sigChan, syscall.SIGTERM)
+
+	// Ignore SIGINT (Ctrl+C) at process level - let liner handle it via terminal
+	signal.Ignore(syscall.SIGINT)
 
 	app := &App{
 		cfg:     cfg,
@@ -175,22 +180,12 @@ func main() {
 		theme:   theme.GetTheme(cfg.UI.Theme),
 	}
 
-	// Handle signals:
-	// - First Ctrl+C when connected to remote host: disconnect from remote
-	// - First Ctrl+C when not connected OR second Ctrl+C: exit sherlock
+	// Handle SIGTERM for graceful shutdown
 	go func() {
-		for {
-			<-sigChan
-			if app.sshClient != nil && app.sshClient.IsConnected() {
-				fmt.Println("\nDisconnecting from remote host... (Press Ctrl+C again to exit)")
-				_ = app.sshClient.Close()
-				app.sshClient = nil
-			} else {
-				fmt.Println("\nReceived interrupt signal, cleaning up...")
-				app.cleanup()
-				os.Exit(0)
-			}
-		}
+		<-sigChan
+		fmt.Println("\nReceived terminate signal, cleaning up...")
+		app.cleanup()
+		os.Exit(0)
 	}()
 
 	// Initialize AI client
@@ -313,6 +308,12 @@ func (a *App) handleInput(input string) error {
 		a.printCommandHelp()
 		return nil
 	case "exit", "quit", "q":
+		// If connected to remote host, only disconnect the session
+		if a.sshClient != nil && a.sshClient.IsConnected() {
+			fmt.Println("Exiting remote session...")
+			return a.disconnect()
+		}
+		// Otherwise, exit the entire program
 		a.cleanup()
 		fmt.Println("Goodbye!")
 		os.Exit(0)
@@ -361,6 +362,11 @@ func (a *App) handleInput(input string) error {
 		return a.showHosts()
 	}
 
+	// Check if it's a whitelisted shell command - bypass LLM parsing for speed
+	if isWhitelistedCommand(input) {
+		return a.executeCommand(input)
+	}
+
 	// Try to parse as sherlock internal command using natural language
 	if cmdInfo, err := a.agent.ParseSherlockCommand(a.ctx, input); err == nil && cmdInfo != nil {
 		return a.executeSherlockCommand(cmdInfo)
@@ -379,7 +385,12 @@ func (a *App) handleConnect(input string) error {
 		if id, err := strconv.ParseInt(idStr, 10, 64); err == nil && a.historyManager != nil {
 			record, err := a.historyManager.GetRecordByID(id)
 			if err == nil {
-				return a.connectToHost(record.Host, record.Port, record.User)
+				return a.connectToHostWithInfo(&agent.SmartConnectionInfo{
+					Type: agent.ConnectionTypeSSH,
+					Host: record.Host,
+					Port: record.Port,
+					User: record.User,
+				})
 			}
 		}
 	}
@@ -395,14 +406,14 @@ func (a *App) handleConnect(input string) error {
 	// Route to appropriate handler based on connection type
 	switch connInfo.Type {
 	case agent.ConnectionTypeSSH:
-		return a.connectToHost(connInfo.Host, connInfo.Port, connInfo.User)
+		return a.connectToHostWithInfo(connInfo)
 	case agent.ConnectionTypeDatabase:
 		return a.connectToDatabase(connInfo)
 	case agent.ConnectionTypeCache:
 		return a.connectToCache(connInfo)
 	default:
 		// Default to SSH connection
-		return a.connectToHost(connInfo.Host, connInfo.Port, connInfo.User)
+		return a.connectToHostWithInfo(connInfo)
 	}
 }
 
@@ -428,6 +439,8 @@ func (a *App) connectToDatabase(connInfo *agent.SmartConnectionInfo) error {
 		Port:         connInfo.Port,
 		User:         connInfo.User,
 		DatabaseName: connInfo.DatabaseName,
+		Alias:        connInfo.Alias,
+		Description:  connInfo.Description,
 	}
 
 	client, err := database.NewClient(conn, password)
@@ -440,7 +453,30 @@ func (a *App) connectToDatabase(connInfo *agent.SmartConnectionInfo) error {
 	// Record connection if manager is available
 	if a.dbManager != nil {
 		conn.Password = password
-		_, _ = a.dbManager.RecordLogin(a.ctx, conn)
+		savedConn, err := a.dbManager.RecordLogin(a.ctx, conn)
+		if err == nil && savedConn != nil {
+			// Handle group if specified
+			if connInfo.Group != "" {
+				// Create group if not exists
+				_, err := a.dbManager.GetGroupByName(a.ctx, connInfo.Group)
+				if err != nil {
+					group := &database.Group{Name: connInfo.Group}
+					_ = a.dbManager.CreateGroup(a.ctx, group)
+				}
+				// Add to group
+				_ = a.dbManager.AddConnectionToGroupByName(a.ctx, savedConn.ID, connInfo.Group)
+			}
+			if connInfo.Alias != "" || connInfo.Group != "" {
+				fmt.Printf("  已保存: [%d] %s", savedConn.ID, savedConn.DisplayName())
+				if connInfo.Alias != "" {
+					fmt.Printf(" 别名: %s", connInfo.Alias)
+				}
+				if connInfo.Group != "" {
+					fmt.Printf(" 分组: %s", connInfo.Group)
+				}
+				fmt.Println()
+			}
+		}
 	}
 
 	// Start interactive shell
@@ -460,6 +496,8 @@ func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
 		Host:          connInfo.Host,
 		Port:          connInfo.Port,
 		DatabaseIndex: 0,
+		Alias:         connInfo.Alias,
+		Description:   connInfo.Description,
 	}
 
 	client, err := cache.NewClient(conn, password)
@@ -487,7 +525,30 @@ func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
 	// Record connection if manager is available
 	if a.cacheManager != nil {
 		conn.Password = password
-		_, _ = a.cacheManager.RecordLogin(a.ctx, conn)
+		savedConn, err := a.cacheManager.RecordLogin(a.ctx, conn)
+		if err == nil && savedConn != nil {
+			// Handle group if specified
+			if connInfo.Group != "" {
+				// Create group if not exists
+				_, err := a.cacheManager.GetGroupByName(a.ctx, connInfo.Group)
+				if err != nil {
+					group := &cache.Group{Name: connInfo.Group}
+					_ = a.cacheManager.CreateGroup(a.ctx, group)
+				}
+				// Add to group
+				_ = a.cacheManager.AddConnectionToGroupByName(a.ctx, savedConn.ID, connInfo.Group)
+			}
+			if connInfo.Alias != "" || connInfo.Group != "" {
+				fmt.Printf("  已保存: [%d] %s", savedConn.ID, savedConn.DisplayName())
+				if connInfo.Alias != "" {
+					fmt.Printf(" 别名: %s", connInfo.Alias)
+				}
+				if connInfo.Group != "" {
+					fmt.Printf(" 分组: %s", connInfo.Group)
+				}
+				fmt.Println()
+			}
+		}
 	}
 
 	// Start interactive shell
@@ -495,7 +556,12 @@ func (a *App) connectToCache(connInfo *agent.SmartConnectionInfo) error {
 	return shell.Run(a.ctx)
 }
 
-func (a *App) connectToHost(host string, port int, user string) error {
+// connectToHostWithInfo connects to an SSH host with full connection info including alias and group.
+func (a *App) connectToHostWithInfo(connInfo *agent.SmartConnectionInfo) error {
+	host := connInfo.Host
+	port := connInfo.Port
+	user := connInfo.User
+
 	fmt.Printf("%s %s@%s:%d...\n", a.theme.FormatInfo("Connecting to"), user, host, port)
 
 	// Store last host for reconnect feature
@@ -535,10 +601,8 @@ func (a *App) connectToHost(host string, port int, user string) error {
 			// Update AI contexts for the new host
 			a.updateAIContextForHost()
 
-			// Update history
-			if a.historyManager != nil {
-				_ = a.historyManager.AddRecord(host, port, user, true)
-			}
+			// Update history and handle alias/group
+			a.saveHostWithAliasAndGroup(host, port, user, true, connInfo.Alias, connInfo.Group, connInfo.Description)
 			return nil
 		} else {
 			keyAuthErr = connectErr
@@ -611,12 +675,71 @@ func (a *App) connectToHost(host string, port int, user string) error {
 		}
 	}
 
-	// Update history
-	if a.historyManager != nil {
-		_ = a.historyManager.AddRecord(host, port, user, pubKeyAdded)
-	}
+	// Update history and handle alias/group
+	a.saveHostWithAliasAndGroup(host, port, user, pubKeyAdded, connInfo.Alias, connInfo.Group, connInfo.Description)
 
 	return nil
+}
+
+// saveHostWithAliasAndGroup saves host to history with optional alias and group
+func (a *App) saveHostWithAliasAndGroup(host string, port int, user string, hasPubKey bool, alias, group, description string) {
+	if a.historyManager != nil {
+		_ = a.historyManager.AddRecord(host, port, user, hasPubKey)
+	}
+
+	// If alias or group specified, update the host record
+	if (alias != "" || group != "" || description != "") && hostsManager != nil {
+		ctx := context.Background()
+		// Find the host by connection info
+		hostList, err := hostsManager.ListHosts(ctx, nil)
+		if err == nil {
+			for _, h := range hostList {
+				if h.Host == host && h.Port == port && h.User == user {
+					// Update alias and description
+					if alias != "" {
+						h.Alias = alias
+					}
+					if description != "" {
+						h.Description = description
+					}
+					_ = hostsManager.UpdateHost(ctx, &h)
+
+					// Handle group
+					if group != "" {
+						// Create group if not exists
+						_, err := hostsManager.GetGroupByName(ctx, group)
+						if err != nil {
+							g := &hosts.Group{Name: group}
+							_ = hostsManager.CreateGroup(ctx, g)
+						}
+						// Add to group
+						_ = hostsManager.AddHostToGroupByName(ctx, h.ID, group)
+					}
+
+					if alias != "" || group != "" {
+						fmt.Printf("  已保存: [%d] %s", h.ID, h.DisplayName())
+						if alias != "" {
+							fmt.Printf(" 别名: %s", alias)
+						}
+						if group != "" {
+							fmt.Printf(" 分组: %s", group)
+						}
+						fmt.Println()
+					}
+					break
+				}
+			}
+		}
+	}
+}
+
+func (a *App) connectToHost(host string, port int, user string) error {
+	return a.connectToHostWithInfo(&agent.SmartConnectionInfo{
+		Type: agent.ConnectionTypeSSH,
+		Host: host,
+		Port: port,
+		User: user,
+	})
 }
 
 func (a *App) handleDirectCommand(cmd string) error {
@@ -628,9 +751,113 @@ func (a *App) handleDirectCommand(cmd string) error {
 	return a.executeCommand(cmd)
 }
 
+// commonShellCommands is a whitelist of common shell commands that can be executed directly
+// without going through LLM parsing, to speed up command execution.
+var commonShellCommands = map[string]bool{
+	// File operations
+	"ls": true, "ll": true, "la": true, "l": true,
+	"cat": true, "head": true, "tail": true, "less": true, "more": true,
+	"pwd": true, "cd": true,
+	"cp": true, "mv": true, "rm": true, "mkdir": true, "rmdir": true,
+	"touch": true, "chmod": true, "chown": true,
+	"find": true, "locate": true, "which": true, "whereis": true,
+	"ln": true, "file": true, "stat": true,
+	"tree": true, "du": true, "df": true,
+	// Text processing
+	"grep": true, "egrep": true, "fgrep": true,
+	"sed": true, "awk": true, "cut": true, "sort": true, "uniq": true,
+	"wc": true, "diff": true, "tr": true, "tee": true,
+	"xargs": true, "column": true,
+	// System info
+	"date": true, "cal": true, "uptime": true, "w": true, "who": true, "whoami": true,
+	"hostname": true, "uname": true, "arch": true,
+	"id": true, "groups": true, "users": true, "last": true, "lastlog": true,
+	"env": true, "printenv": true, "set": true, "export": true,
+	"locale": true, "timedatectl": true,
+	// Process management
+	"ps": true, "top": true, "htop": true, "pgrep": true, "pidof": true,
+	"kill": true, "killall": true, "pkill": true,
+	"jobs": true, "bg": true, "fg": true, "nohup": true,
+	"nice": true, "renice": true, "time": true,
+	// Network
+	"ping": true, "curl": true, "wget": true,
+	"netstat": true, "ss": true, "ip": true, "ifconfig": true,
+	"nslookup": true, "dig": true, "host": true,
+	"route": true, "traceroute": true, "tracepath": true,
+	"telnet": true, "nc": true, "nmap": true,
+	"iptables": true, "firewall-cmd": true,
+	// Disk & filesystem
+	"mount": true, "umount": true, "fdisk": true, "lsblk": true,
+	"blkid": true, "parted": true,
+	// Package management
+	"apt": true, "apt-get": true, "apt-cache": true, "dpkg": true,
+	"yum": true, "dnf": true, "rpm": true,
+	"pacman": true, "zypper": true,
+	"pip": true, "pip3": true, "npm": true, "yarn": true, "go": true,
+	// Service management
+	"systemctl": true, "service": true, "journalctl": true,
+	"chkconfig": true,
+	// Archive
+	"tar": true, "gzip": true, "gunzip": true, "zip": true, "unzip": true,
+	"bzip2": true, "xz": true, "7z": true,
+	// Memory & performance
+	"free": true, "vmstat": true, "iostat": true, "mpstat": true,
+	"sar": true, "dmesg": true, "lscpu": true, "lsmem": true,
+	// User management
+	"useradd": true, "userdel": true, "usermod": true,
+	"groupadd": true, "groupdel": true, "groupmod": true,
+	"passwd": true, "chpasswd": true,
+	// Other common commands
+	"echo": true, "printf": true, "clear": true, "reset": true,
+	"man": true, "info": true, "help": true,
+	"history": true, "alias": true, "unalias": true,
+	"source": true, "bash": true, "sh": true, "zsh": true,
+	"sudo": true, "su": true,
+	"crontab": true, "at": true,
+	"git": true, "svn": true,
+	"docker": true, "docker-compose": true, "kubectl": true,
+	"make": true, "cmake": true, "gcc": true, "g++": true,
+	"python": true, "python3": true, "java": true, "node": true,
+	"vim": true, "vi": true, "nano": true, "emacs": true,
+	"screen": true, "tmux": true,
+	"ssh": true, "scp": true, "rsync": true, "sftp": true,
+	"perl": true, "ruby": true,
+	"lsof": true, "strace": true, "ltrace": true,
+}
+
+// isWhitelistedCommand checks if the input starts with a whitelisted shell command.
+// Returns true if it's a whitelisted command that can be executed directly.
+func isWhitelistedCommand(input string) bool {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return false
+	}
+
+	// Extract the first word (command name)
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false
+	}
+
+	cmd := parts[0]
+
+	// Handle sudo prefix
+	if cmd == "sudo" && len(parts) > 1 {
+		cmd = parts[1]
+	}
+
+	return commonShellCommands[cmd]
+}
+
 func (a *App) handleCommandRequest(input string) error {
 	// Check if it's a direct command with $ prefix (bypass AI)
 	isDirectCommand := strings.HasPrefix(strings.TrimSpace(input), "$")
+
+	// Check if it's a whitelisted shell command (bypass AI for speed)
+	if !isDirectCommand && isWhitelistedCommand(input) {
+		// Execute whitelisted command directly without AI parsing
+		return a.executeCommand(input)
+	}
 
 	// Show "thinking..." for AI-processed commands
 	if !isDirectCommand {
@@ -1496,9 +1723,6 @@ func (a *App) printCommandHelp() {
 	fmt.Println(a.theme.FormatTableHeader("命令执行:"))
 	fmt.Printf("  %s                  %s\n", a.theme.FormatCommand("$<command>"), a.theme.FormatDescription("直接执行命令"))
 	fmt.Printf("  %s\n", a.theme.FormatDescription("或使用自然语言，如 \"查看磁盘使用情况\""))
-
-	fmt.Println()
-	fmt.Printf("%s\n", a.theme.FormatInfo("💡 演示建议: advisor -> inspect -> playbook run daily-inspect -> audit stats"))
 }
 
 // executeSherlockCommand executes a parsed sherlock internal command.
