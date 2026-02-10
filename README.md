@@ -8,7 +8,7 @@
 
 ## 🔍 AI-Powered SSH Remote Operations Tool
 
-Sherlock is an AI-based remote operations tool built on SSH. Interact with remote hosts using **natural language** - no need to memorize complex shell commands.
+Sherlock is an AI-driven remote operations tool built on SSH. Interact with remote hosts using **natural language** - no need to memorize complex shell commands.
 
 ### ✨ Key Features
 
@@ -16,45 +16,48 @@ Sherlock is an AI-based remote operations tool built on SSH. Interact with remot
 |----------|----------|
 | **🗣️ Natural Language** | Describe tasks in plain English/Chinese, AI translates to shell commands |
 | **🤖 AI Operations** | Intelligent advisor, auto-diagnosis, one-click fixes, automated playbooks |
-| **🧠 AI Enhanced** | Multi-turn dialogue with memory, proactive analysis, command prediction, Tool Calling |
+| **🧠 AI Enhanced** | Multi-turn dialogue memory, proactive analysis, command prediction |
 | **📊 Visualization** | Terminal ASCII dashboard, multi-host status matrix, health scoring |
 | **⚡ Batch Operations** | Execute commands across multiple hosts with progress tracking |
 | **🔐 Security** | Auto SSH key management, encrypted credentials, operation audit logs |
-| **📁 File Transfer** | SFTP with progress tracking, resume capability, recursive operations |
+| **📁 File Transfer** | Upload/download with progress, support `--host=<id|alias>` targeting |
 
 ### 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Sherlock CLI                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │   Advisor   │  │  Playbook   │  │  Dashboard  │  │    Audit    │        │
-│  │ (AI分析诊断) │  │ (自动化剧本) │  │ (可视化面板) │  │  (操作审计)  │        │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
-│         │                │                │                │               │
-│  ┌──────┴────────────────┴────────────────┴────────────────┴──────┐        │
-│  │                        Core Engine                              │        │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │        │
-│  │  │  Agent  │  │ Analyzer│  │  Batch  │  │ Monitor │           │        │
-│  │  │(NLP+Mem)│  │(Proact.)│  │ (批量)  │  │ (监控)  │           │        │
-│  │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘           │        │
-│  └───────┼────────────┼────────────┼────────────┼────────────────┘        │
-│          │            │            │            │                          │
-│  ┌───────┴────────────┴────────────┴────────────┴────────────────┐        │
-│  │                     Infrastructure Layer                       │        │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │        │
-│  │  │SSH Client│  │ Tunnel  │  │Transfer │  │ Session │           │        │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘           │        │
-│  └────────────────────────────────────────────────────────────────┘        │
-└─────────────────────────────────────────────────────────────────────────────┘
-         │                              │                              │
-         ▼                              ▼                              ▼
-┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
-│  Remote Hosts   │          │   LLM Services  │          │   Local Storage │
-│  (SSH/SFTP)     │          │ Ollama/OpenAI/  │          │  (SQLite/JSON)  │
-│                 │          │    DeepSeek     │          │                 │
-└─────────────────┘          └─────────────────┘          └─────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                           Sherlock CLI                                 │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│   │ Advisor  │ │ Playbook │ │Dashboard │ │  Audit   │ │ Inspector│   │
+│   │  (AI诊断) │ │ (自动剧本) │ │ (可视化)  │ │ (审计)   │ │  (巡检)  │   │
+│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘   │
+│        └────────────┴────────────┴────────────┴────────────┘          │
+│                                  │                                     │
+│   ┌──────────────────────────────┴──────────────────────────────┐     │
+│   │                      Core Engine                             │     │
+│   │  ┌────────────┐  ┌────────────┐  ┌────────────┐             │     │
+│   │  │   Agent    │  │  Analyzer  │  │   Batch    │             │     │
+│   │  │ NLP+Memory │  │  Proactive │  │  Executor  │             │     │
+│   │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘             │     │
+│   └────────┴───────────────┴───────────────┴────────────────────┘     │
+│                                  │                                     │
+│   ┌──────────────────────────────┴──────────────────────────────┐     │
+│   │                   Infrastructure                             │     │
+│   │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │     │
+│   │  │SSH Client│ │ Transfer │ │  Tunnel  │ │  Hosts   │        │     │
+│   │  │  (连接)   │ │ (文件传输) │ │  (隧道)  │ │  (主机库) │        │     │
+│   │  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │     │
+│   └─────────────────────────────────────────────────────────────┘     │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+        │                         │                         │
+        ▼                         ▼                         ▼
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│ Remote Hosts  │       │  LLM Service  │       │ Local Storage │
+│   SSH/SFTP    │       │ Ollama/OpenAI │       │ SQLite + JSON │
+└───────────────┘       └───────────────┘       └───────────────┘
 ```
 
 ### 🚀 Quick Start
@@ -74,20 +77,15 @@ sherlock> connect to 192.168.1.100 as root
 sherlock[root@192.168.1.100]> show me disk usage
 sherlock[root@192.168.1.100]> find large files over 1GB
 
-# AI Operations
-sherlock> advisor              # AI intelligent advisor
-sherlock> inspect              # Health inspection
-sherlock> playbook run daily-inspect  # Run playbook
-sherlock> dashboard            # Visual dashboard
-sherlock> audit stats          # Audit statistics
+# File transfer (support --host=<id|alias>)
+sherlock> upload local.txt /root/ --host=myserver
+sherlock> download /var/log/app.log ./logs/ --host=1
 
-# AI Enhanced Features
-sherlock> predict              # Get AI command predictions
-sherlock> memory status        # View conversation memory
-sherlock> memory clear         # Clear current session
-sherlock> playbook generate deploy a nginx service  # AI generate playbook
-sherlock> playbook template    # List playbook templates
-sherlock> playbook improve daily-inspect  # AI improve existing playbook
+# AI Operations
+sherlock> advisor                          # AI intelligent advisor
+sherlock> inspect                          # Health inspection
+sherlock> playbook run daily-inspect       # Run playbook
+sherlock> playbook generate deploy nginx   # AI generate playbook
 ```
 
 ### ⚙️ Configuration
@@ -100,73 +98,26 @@ Create `~/.config/sherlock/config.json`:
     "provider": "ollama",
     "base_url": "http://localhost:11434",
     "model": "qwen2.5:7b"
-  },
-  "ai_enhanced": {
-    "enable_memory": true,
-    "enable_proactive_analysis": true,
-    "enable_prediction": true,
-    "enable_tool_calling": false,
-    "memory_window_size": 20,
-    "max_command_history": 100,
-    "analyze_on_error": true,
-    "analyze_on_warning": true
   }
 }
 ```
 
 **Supported LLM Providers:** Ollama (local), OpenAI, DeepSeek
 
-**AI Enhanced Config:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enable_memory` | `true` | Multi-turn dialogue with session memory |
-| `enable_proactive_analysis` | `true` | Auto-analyze command output on errors |
-| `enable_prediction` | `true` | Command intent prediction |
-| `enable_tool_calling` | `false` | Allow AI to call SSH tools autonomously |
-| `memory_window_size` | `20` | Sliding window size (messages) |
-
-### 📋 Commands Reference
+### 📋 Commands
 
 | Command | Description |
 |---------|-------------|
 | `connect <host>` | Connect to host (natural language supported) |
 | `$<cmd>` | Execute shell command directly |
-| `advisor` | AI intelligent operations advisor |
-| `inspect [group]` | Batch health inspection |
-| `playbook [run <name>]` | Manage/run automated playbooks |
-| `dashboard` | Visual resource dashboard |
-| `audit [stats]` | Operation audit logs |
-| `quickfix` | AI-driven quick fix |
+| `upload/download` | File transfer with `--host=<id\|alias>` |
+| `advisor` | AI intelligent advisor |
+| `inspect` | Health inspection |
+| `playbook` | Automated playbooks |
+| `dashboard` | Visual dashboard |
 | `batch <cmd>` | Execute on multiple hosts |
 | `tunnel` | SSH tunnel management |
-| `snippet` | Command template management |
-| `predict` | AI command intent prediction |
-| `memory [status\|clear\|new\|history]` | Conversation memory management |
-| `playbook generate <desc>` | AI generate playbook from description |
-| `playbook template` | List predefined playbook templates |
-| `playbook improve <name>` | AI suggest improvements for playbook |
-
-### 📁 Project Structure
-
-```
-sherlock/
-├── cmd/sherlock/      # CLI application
-├── internal/
-│   ├── advisor/       # 🆕 AI intelligent advisor
-│   ├── agent/         # NLP + Memory + Predictor + Tool Calling
-│   ├── ai/            # LLM client (Ollama/OpenAI/DeepSeek)
-│   ├── analyzer/      # Output analysis & proactive diagnosis
-│   ├── audit/         # 🆕 Operation audit logs
-│   ├── batch/         # Batch operations
-│   ├── dashboard/     # 🆕 Visual dashboard
-│   ├── healthcheck/   # 🆕 Health inspection
-│   ├── playbook/      # 🆕 Automated playbooks
-│   ├── session/       # Multi-session management
-│   ├── tunnel/        # SSH tunneling
-│   └── ...
-└── pkg/sshclient/     # SSH client implementation
-```
+| `host add/list/del` | Host management |
 
 ### 📄 License
 
