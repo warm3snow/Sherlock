@@ -18,6 +18,7 @@ LDFLAGS := -ldflags "-s -w \
 # Directories
 BUILD_DIR := build
 CMD_DIR := cmd/sherlock
+MCP_DIR := mcp
 
 # Install path
 PREFIX ?= /usr/local
@@ -145,6 +146,19 @@ build-windows:
 	@mkdir -p $(BUILD_DIR)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./$(CMD_DIR)
 
+# Build MCP server
+.PHONY: build-mcp
+build-mcp:
+	@echo "Building MCP server..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BUILD_DIR)/sherlock-mcp ./$(MCP_DIR)
+	@echo "MCP server built: $(BUILD_DIR)/sherlock-mcp"
+
+# Build all including MCP
+.PHONY: build-all-with-mcp
+build-all-with-mcp: build build-mcp
+	@echo "All builds complete"
+
 # Run the application
 .PHONY: run
 run:
@@ -170,6 +184,7 @@ help:
 	@echo "Build targets:"
 	@echo "  build         Build the binary (default)"
 	@echo "  build-debug   Build with debug info"
+	@echo "  build-mcp     Build MCP server for Claude integration"
 	@echo "  build-all     Build for all platforms"
 	@echo "  build-linux   Build for Linux (amd64, arm64)"
 	@echo "  build-darwin  Build for macOS (amd64, arm64)"
