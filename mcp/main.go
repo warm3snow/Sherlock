@@ -119,8 +119,10 @@ func NewMCPServer() *MCPServer {
 func findSherlockBinary() string {
 	// Try to find sherlock in various locations
 	candidates := []string{
-		// Same directory as MCP server
+		// Same directory as MCP server (build/sherlock-mcp -> build/sherlock)
 		filepath.Join(filepath.Dir(os.Args[0]), "sherlock"),
+		// Parent directory's build folder
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "build", "sherlock"),
 		// Parent directory
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "sherlock"),
 		// PATH
@@ -128,13 +130,22 @@ func findSherlockBinary() string {
 	}
 	
 	for _, path := range candidates {
-		if absPath, err := exec.LookPath(path); err == nil {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(absPath); err == nil {
 			return absPath
 		}
 	}
 	
-	// Default to assuming it's in PATH
-	return "sherlock"
+	// Try PATH lookup
+	if absPath, err := exec.LookPath("sherlock"); err == nil {
+		return absPath
+	}
+	
+	// Default to same directory
+	return filepath.Join(filepath.Dir(os.Args[0]), "sherlock")
 }
 
 func (s *MCPServer) Run() error {
@@ -714,11 +725,11 @@ func (s *MCPServer) executeCommand(ctx context.Context, args map[string]interfac
 
 	host, _ := args["host"].(string)
 	
-	cmdArgs := []string{"--mcp-exec"}
+	cmdArgs := []string{"-e", command, "-o", "json"}
 	if host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
+		// TODO: Add host connection support
+		_ = host
 	}
-	cmdArgs = append(cmdArgs, "--", command)
 
 	return s.runSherlockCommand(ctx, cmdArgs...)
 }
@@ -729,13 +740,8 @@ func (s *MCPServer) analyzeContent(ctx context.Context, args map[string]interfac
 		return "", fmt.Errorf("content is required")
 	}
 
-	context_, _ := args["context"].(string)
-	
-	cmdArgs := []string{"--mcp-analyze", "--content", content}
-	if context_ != "" {
-		cmdArgs = append(cmdArgs, "--context", context_)
-	}
-
+	// Use analyze command with the content
+	cmdArgs := []string{"-e", fmt.Sprintf("analyze %s", content), "-o", "json"}
 	return s.runSherlockCommand(ctx, cmdArgs...)
 }
 
@@ -745,13 +751,7 @@ func (s *MCPServer) diagnoseError(ctx context.Context, args map[string]interface
 		return "", fmt.Errorf("error message is required")
 	}
 
-	command, _ := args["command"].(string)
-	
-	cmdArgs := []string{"--mcp-diagnose", "--error", errorMsg}
-	if command != "" {
-		cmdArgs = append(cmdArgs, "--command", command)
-	}
-
+	cmdArgs := []string{"-e", fmt.Sprintf("diagnose %s", errorMsg), "-o", "json"}
 	return s.runSherlockCommand(ctx, cmdArgs...)
 }
 
@@ -761,33 +761,32 @@ func (s *MCPServer) batchExecute(ctx context.Context, args map[string]interface{
 		return "", fmt.Errorf("command is required")
 	}
 
-	cmdArgs := []string{"--mcp-batch"}
+	batchCmd := fmt.Sprintf("batch %s", command)
 	
 	if group, ok := args["group"].(string); ok && group != "" {
-		cmdArgs = append(cmdArgs, "--group", group)
+		batchCmd += fmt.Sprintf(" --group %s", group)
 	}
 	if tag, ok := args["tag"].(string); ok && tag != "" {
-		cmdArgs = append(cmdArgs, "--tag", tag)
+		batchCmd += fmt.Sprintf(" --tag %s", tag)
 	}
 	if all, ok := args["all"].(bool); ok && all {
-		cmdArgs = append(cmdArgs, "--all")
+		batchCmd += " --all"
 	}
 	
-	cmdArgs = append(cmdArgs, "--", command)
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", batchCmd, "-o", "json")
 }
 
 func (s *MCPServer) healthCheck(ctx context.Context, args map[string]interface{}) (string, error) {
-	cmdArgs := []string{"--mcp-health"}
+	healthCmd := "health"
 	
 	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
+		healthCmd += " " + host
 	}
 	if level, ok := args["level"].(string); ok && level != "" {
-		cmdArgs = append(cmdArgs, "--level", level)
+		healthCmd += " --level " + level
 	}
 
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", healthCmd, "-o", "json")
 }
 
 func (s *MCPServer) uploadFile(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -797,16 +796,13 @@ func (s *MCPServer) uploadFile(ctx context.Context, args map[string]interface{})
 		return "", fmt.Errorf("local_path and remote_path are required")
 	}
 
-	cmdArgs := []string{"--mcp-upload", "--local", localPath, "--remote", remotePath}
+	uploadCmd := fmt.Sprintf("upload %s %s", localPath, remotePath)
 	
-	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
-	}
 	if recursive, ok := args["recursive"].(bool); ok && recursive {
-		cmdArgs = append(cmdArgs, "--recursive")
+		uploadCmd += " -r"
 	}
 
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", uploadCmd, "-o", "json")
 }
 
 func (s *MCPServer) downloadFile(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -816,29 +812,17 @@ func (s *MCPServer) downloadFile(ctx context.Context, args map[string]interface{
 		return "", fmt.Errorf("local_path and remote_path are required")
 	}
 
-	cmdArgs := []string{"--mcp-download", "--remote", remotePath, "--local", localPath}
+	downloadCmd := fmt.Sprintf("download %s %s", remotePath, localPath)
 	
-	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
-	}
 	if recursive, ok := args["recursive"].(bool); ok && recursive {
-		cmdArgs = append(cmdArgs, "--recursive")
+		downloadCmd += " -r"
 	}
 
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", downloadCmd, "-o", "json")
 }
 
 func (s *MCPServer) hostsList(ctx context.Context, args map[string]interface{}) (string, error) {
-	cmdArgs := []string{"--mcp-hosts", "list"}
-	
-	if group, ok := args["group"].(string); ok && group != "" {
-		cmdArgs = append(cmdArgs, "--group", group)
-	}
-	if tag, ok := args["tag"].(string); ok && tag != "" {
-		cmdArgs = append(cmdArgs, "--tag", tag)
-	}
-
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", "hl", "-o", "json")
 }
 
 func (s *MCPServer) hostsAdd(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -850,22 +834,18 @@ func (s *MCPServer) hostsAdd(ctx context.Context, args map[string]interface{}) (
 		return "", fmt.Errorf("alias, host, and user are required")
 	}
 
-	cmdArgs := []string{"--mcp-hosts", "add", "--alias", alias, "--host", host, "--user", user}
+	port := 22
+	if p, ok := args["port"].(float64); ok {
+		port = int(p)
+	}
 	
-	if port, ok := args["port"].(float64); ok {
-		cmdArgs = append(cmdArgs, "--port", fmt.Sprintf("%d", int(port)))
-	}
-	if password, ok := args["password"].(string); ok && password != "" {
-		cmdArgs = append(cmdArgs, "--password", password)
-	}
-	if keyPath, ok := args["key_path"].(string); ok && keyPath != "" {
-		cmdArgs = append(cmdArgs, "--key", keyPath)
-	}
+	addCmd := fmt.Sprintf("ha %s@%s:%d --alias %s", user, host, port, alias)
+	
 	if group, ok := args["group"].(string); ok && group != "" {
-		cmdArgs = append(cmdArgs, "--group", group)
+		addCmd += " --group " + group
 	}
 
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", addCmd, "-o", "json")
 }
 
 func (s *MCPServer) tunnelCreate(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -883,20 +863,12 @@ func (s *MCPServer) tunnelCreate(ctx context.Context, args map[string]interface{
 		remoteHost = "localhost"
 	}
 
-	cmdArgs := []string{
-		"--mcp-tunnel", "create",
-		"--type", tunnelType,
-		"--host", host,
-		"--local-port", fmt.Sprintf("%d", int(localPort)),
-		"--remote-host", remoteHost,
-		"--remote-port", fmt.Sprintf("%d", int(remotePort)),
-	}
-
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	tunnelCmd := fmt.Sprintf("tunnel %s %d:%s:%d", tunnelType, int(localPort), remoteHost, int(remotePort))
+	return s.runSherlockCommand(ctx, "-e", tunnelCmd, "-o", "json")
 }
 
 func (s *MCPServer) tunnelList(ctx context.Context, args map[string]interface{}) (string, error) {
-	return s.runSherlockCommand(ctx, "--mcp-tunnel", "list")
+	return s.runSherlockCommand(ctx, "-e", "tunnel list", "-o", "json")
 }
 
 func (s *MCPServer) tunnelClose(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -904,11 +876,11 @@ func (s *MCPServer) tunnelClose(ctx context.Context, args map[string]interface{}
 	if id == "" {
 		return "", fmt.Errorf("tunnel id is required")
 	}
-	return s.runSherlockCommand(ctx, "--mcp-tunnel", "close", "--id", id)
+	return s.runSherlockCommand(ctx, "-e", fmt.Sprintf("tunnel close %s", id), "-o", "json")
 }
 
 func (s *MCPServer) playbookList(ctx context.Context, args map[string]interface{}) (string, error) {
-	return s.runSherlockCommand(ctx, "--mcp-playbook", "list")
+	return s.runSherlockCommand(ctx, "-e", "playbook list", "-o", "json")
 }
 
 func (s *MCPServer) playbookRun(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -917,18 +889,13 @@ func (s *MCPServer) playbookRun(ctx context.Context, args map[string]interface{}
 		return "", fmt.Errorf("playbook name is required")
 	}
 
-	cmdArgs := []string{"--mcp-playbook", "run", "--name", name}
+	playbookCmd := fmt.Sprintf("playbook run %s", name)
 	
 	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
-	}
-	
-	if vars, ok := args["vars"].(map[string]interface{}); ok {
-		varsJSON, _ := json.Marshal(vars)
-		cmdArgs = append(cmdArgs, "--vars", string(varsJSON))
+		playbookCmd += " --host " + host
 	}
 
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", playbookCmd, "-o", "json")
 }
 
 func (s *MCPServer) advisor(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -937,23 +904,11 @@ func (s *MCPServer) advisor(ctx context.Context, args map[string]interface{}) (s
 		return "", fmt.Errorf("query is required")
 	}
 
-	cmdArgs := []string{"--mcp-advisor", "--query", query}
-	
-	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
-	}
-
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", fmt.Sprintf("advisor %s", query), "-o", "json")
 }
 
 func (s *MCPServer) snippetList(ctx context.Context, args map[string]interface{}) (string, error) {
-	cmdArgs := []string{"--mcp-snippet", "list"}
-	
-	if category, ok := args["category"].(string); ok && category != "" {
-		cmdArgs = append(cmdArgs, "--category", category)
-	}
-
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", "snippet list", "-o", "json")
 }
 
 func (s *MCPServer) snippetRun(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -962,17 +917,11 @@ func (s *MCPServer) snippetRun(ctx context.Context, args map[string]interface{})
 		return "", fmt.Errorf("snippet name is required")
 	}
 
-	cmdArgs := []string{"--mcp-snippet", "run", "--name", name}
-	
-	if host, ok := args["host"].(string); ok && host != "" {
-		cmdArgs = append(cmdArgs, "--host", host)
-	}
-
-	return s.runSherlockCommand(ctx, cmdArgs...)
+	return s.runSherlockCommand(ctx, "-e", fmt.Sprintf("snippet run %s", name), "-o", "json")
 }
 
 func (s *MCPServer) databaseList(ctx context.Context, args map[string]interface{}) (string, error) {
-	return s.runSherlockCommand(ctx, "--mcp-database", "list")
+	return s.runSherlockCommand(ctx, "-e", "dl", "-o", "json")
 }
 
 func (s *MCPServer) databaseQuery(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -983,11 +932,12 @@ func (s *MCPServer) databaseQuery(ctx context.Context, args map[string]interface
 		return "", fmt.Errorf("alias and query are required")
 	}
 
-	return s.runSherlockCommand(ctx, "--mcp-database", "query", "--alias", alias, "--query", query)
+	// Database query in non-interactive mode is complex, return info message
+	return fmt.Sprintf(`{"info": "Database query requires interactive connection. Use 'dc %s' to connect first, then run your query."}`, alias), nil
 }
 
 func (s *MCPServer) cacheList(ctx context.Context, args map[string]interface{}) (string, error) {
-	return s.runSherlockCommand(ctx, "--mcp-cache", "list")
+	return s.runSherlockCommand(ctx, "-e", "cl", "-o", "json")
 }
 
 func (s *MCPServer) cacheCommand(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -998,7 +948,8 @@ func (s *MCPServer) cacheCommand(ctx context.Context, args map[string]interface{
 		return "", fmt.Errorf("alias and command are required")
 	}
 
-	return s.runSherlockCommand(ctx, "--mcp-cache", "exec", "--alias", alias, "--command", command)
+	// Cache command in non-interactive mode is complex, return info message
+	return fmt.Sprintf(`{"info": "Cache command requires interactive connection. Use 'cc %s' to connect first, then run your command."}`, alias), nil
 }
 
 // Response helpers

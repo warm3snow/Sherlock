@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -79,6 +80,10 @@ type App struct {
 	// AI Enhanced features
 	proactiveAnalyzer *analyzer.ProactiveAnalyzer
 	toolRegistry      *agent.ToolRegistry
+	
+	// Non-interactive mode
+	nonInteractive bool
+	outputFormat   string
 }
 
 func main() {
@@ -92,13 +97,16 @@ func main() {
 	}
 
 	var (
-		configPath   string
-		showVersion  bool
-		showHelp     bool
-		providerFlag string
-		modelFlag    string
-		baseURLFlag  string
-		apiKeyFlag   string
+		configPath      string
+		showVersion     bool
+		showHelp        bool
+		providerFlag    string
+		modelFlag       string
+		baseURLFlag     string
+		apiKeyFlag      string
+		execCommand     string
+		outputFormat    string
+		nonInteractive  bool
 	)
 
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
@@ -111,7 +119,18 @@ func main() {
 	flag.StringVar(&modelFlag, "model", "", "Model name")
 	flag.StringVar(&baseURLFlag, "base-url", "", "Base URL for LLM API")
 	flag.StringVar(&apiKeyFlag, "api-key", "", "API key for LLM provider")
+	flag.StringVar(&execCommand, "exec", "", "Execute command in non-interactive mode")
+	flag.StringVar(&execCommand, "e", "", "Execute command in non-interactive mode (shorthand)")
+	flag.StringVar(&outputFormat, "output", "text", "Output format: text, json")
+	flag.StringVar(&outputFormat, "o", "text", "Output format: text, json (shorthand)")
+	flag.BoolVar(&nonInteractive, "non-interactive", false, "Run in non-interactive mode")
+	flag.BoolVar(&nonInteractive, "n", false, "Run in non-interactive mode (shorthand)")
 	flag.Parse()
+	
+	// Auto-enable non-interactive mode if -exec is provided
+	if execCommand != "" {
+		nonInteractive = true
+	}
 
 	if showHelp {
 		printHelp()
@@ -173,11 +192,13 @@ func main() {
 	signal.Ignore(syscall.SIGINT)
 
 	app := &App{
-		cfg:     cfg,
-		ctx:     ctx,
-		cancel:  cancel,
-		sigChan: sigChan,
-		theme:   theme.GetTheme(cfg.UI.Theme),
+		cfg:            cfg,
+		ctx:            ctx,
+		cancel:         cancel,
+		sigChan:        sigChan,
+		theme:          theme.GetTheme(cfg.UI.Theme),
+		nonInteractive: nonInteractive,
+		outputFormat:   outputFormat,
 	}
 
 	// Handle SIGTERM for graceful shutdown
@@ -234,13 +255,268 @@ func main() {
 	app.localClient = sshclient.NewLocalClient()
 
 	// Run the application
-	if err := app.run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		app.cleanup()
-		os.Exit(1)
+	if nonInteractive {
+		// Non-interactive mode: execute command and exit
+		if err := app.runNonInteractive(execCommand); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			app.cleanup()
+			os.Exit(1)
+		}
+	} else {
+		// Interactive mode
+		if err := app.run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			app.cleanup()
+			os.Exit(1)
+		}
 	}
 
 	app.cleanup()
+}
+
+// runNonInteractive executes a command in non-interactive mode.
+func (a *App) runNonInteractive(command string) error {
+	if command == "" {
+		return fmt.Errorf("no command specified. Use -e or --exec to specify a command")
+	}
+	
+	// Execute the command
+	return a.handleInputNonInteractive(command)
+}
+
+// handleInputNonInteractive processes input in non-interactive mode.
+func (a *App) handleInputNonInteractive(input string) error {
+	// Handle built-in commands that return structured data
+	switch strings.ToLower(input) {
+	case "help":
+		return a.printNonInteractiveHelp()
+	case "status":
+		return a.showStatusNonInteractive()
+	}
+	
+	// Try enhanced commands first (host list, db list, etc.)
+	if handled, err := a.handleEnhancedCommandNonInteractive(input); handled {
+		return err
+	}
+	
+	// Check if it's a whitelisted shell command - execute directly
+	if isWhitelistedCommand(input) {
+		return a.executeCommandNonInteractive(input)
+	}
+	
+	// Parse as command request using AI
+	cmdInfo, err := a.agent.ParseCommandRequest(a.ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to parse command: %w", err)
+	}
+	
+	// Execute commands
+	for _, cmd := range cmdInfo.Commands {
+		if err := a.executeCommandNonInteractive(cmd); err != nil {
+			return err
+		}
+	}
+	
+	return nil
+}
+
+// executeCommandNonInteractive executes a command and outputs result.
+func (a *App) executeCommandNonInteractive(cmd string) error {
+	var result *sshclient.ExecuteResult
+	
+	// Use SSH client if connected, otherwise use local client
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		result = a.sshClient.Execute(a.ctx, cmd)
+	} else {
+		result = a.localClient.Execute(a.ctx, cmd)
+	}
+	
+	if a.outputFormat == "json" {
+		return a.outputJSON(map[string]interface{}{
+			"command":   cmd,
+			"stdout":    result.Stdout,
+			"stderr":    result.Stderr,
+			"exit_code": result.ExitCode,
+			"error":     errorToString(result.Error),
+		})
+	}
+	
+	// Text output
+	if result.Stdout != "" {
+		fmt.Print(result.Stdout)
+	}
+	if result.Stderr != "" {
+		fmt.Fprint(os.Stderr, result.Stderr)
+	}
+	
+	if result.Error != nil {
+		return result.Error
+	}
+	
+	return nil
+}
+
+// handleEnhancedCommandNonInteractive handles enhanced commands in non-interactive mode.
+func (a *App) handleEnhancedCommandNonInteractive(input string) (bool, error) {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false, nil
+	}
+	
+	cmd := strings.ToLower(parts[0])
+	args := parts[1:]
+	
+	switch cmd {
+	// Host commands
+	case "host", "hosts", "hl":
+		return true, a.handleHostsNonInteractive(args)
+	case "ha":
+		return true, a.handleHostAddNonInteractive(args)
+	case "hr":
+		return true, a.handleHostRemoveNonInteractive(args)
+	
+	// Database commands
+	case "db", "database", "dl":
+		return true, a.handleDatabaseNonInteractive(args)
+	case "da":
+		return true, a.handleDatabaseAddNonInteractive(args)
+	case "dr":
+		return true, a.handleDatabaseRemoveNonInteractive(args)
+	
+	// Cache commands
+	case "cache", "cl":
+		return true, a.handleCacheNonInteractive(args)
+	case "ca":
+		return true, a.handleCacheAddNonInteractive(args)
+	case "cr":
+		return true, a.handleCacheRemoveNonInteractive(args)
+	
+	// Tunnel commands
+	case "tunnel", "tun":
+		return true, a.handleTunnelNonInteractive(args)
+	
+	// Playbook commands
+	case "playbook":
+		return true, a.handlePlaybookNonInteractive(args)
+	
+	// Snippet commands
+	case "snippet", "snip":
+		return true, a.handleSnippetNonInteractive(args)
+	
+	// Batch commands
+	case "batch":
+		return true, a.handleBatchNonInteractive(args)
+	
+	// Health check
+	case "health", "check":
+		return true, a.handleHealthCheckNonInteractive(args)
+	
+	// Analyze
+	case "analyze":
+		return true, a.handleAnalyzeNonInteractive(args)
+	
+	// Diagnose
+	case "diagnose":
+		return true, a.handleDiagnoseNonInteractive(args)
+	
+	// Advisor
+	case "advisor":
+		return true, a.handleAdvisorNonInteractive(args)
+	}
+	
+	return false, nil
+}
+
+// showStatusNonInteractive shows status in non-interactive mode.
+func (a *App) showStatusNonInteractive() error {
+	status := map[string]interface{}{
+		"version":      version,
+		"llm_provider": string(a.cfg.LLM.Provider),
+		"llm_model":    a.cfg.LLM.Model,
+		"theme":        a.cfg.UI.Theme,
+		"connected":    a.sshClient != nil && a.sshClient.IsConnected(),
+		"ai_enhanced": map[string]bool{
+			"memory":     a.cfg.AIEnhanced.EnableMemory,
+			"analysis":   a.cfg.AIEnhanced.EnableProactiveAnalysis,
+			"prediction": a.cfg.AIEnhanced.EnablePrediction,
+			"tool_call":  a.cfg.AIEnhanced.EnableToolCalling,
+		},
+	}
+	
+	if a.sshClient != nil && a.sshClient.IsConnected() {
+		status["host"] = a.sshClient.HostInfoString()
+	} else {
+		status["host"] = a.localClient.HostInfoString()
+	}
+	
+	return a.outputJSON(status)
+}
+
+// printNonInteractiveHelp shows help for non-interactive mode.
+func (a *App) printNonInteractiveHelp() error {
+	help := map[string]interface{}{
+		"usage": "sherlock -e <command> [-o json]",
+		"commands": map[string]string{
+			"host, hl":         "List all hosts",
+			"ha <connection>":  "Add host",
+			"hr <id>":          "Remove host",
+			"db, dl":           "List databases",
+			"da <connection>":  "Add database",
+			"dr <id>":          "Remove database",
+			"cache, cl":        "List caches",
+			"ca <connection>":  "Add cache",
+			"cr <id>":          "Remove cache",
+			"tunnel list":      "List tunnels",
+			"tunnel create":    "Create tunnel",
+			"tunnel close":     "Close tunnel",
+			"playbook list":    "List playbooks",
+			"playbook run":     "Run playbook",
+			"snippet list":     "List snippets",
+			"snippet run":      "Run snippet",
+			"batch <cmd>":      "Batch execute",
+			"health <host>":    "Health check",
+			"analyze <cmd>":    "Analyze command output",
+			"diagnose <error>": "Diagnose error",
+			"advisor <query>":  "AI advisor",
+			"status":           "Show status",
+		},
+		"options": map[string]string{
+			"-e, --exec":           "Command to execute",
+			"-o, --output":         "Output format (text, json)",
+			"-n, --non-interactive": "Non-interactive mode",
+		},
+	}
+	
+	if a.outputFormat == "json" {
+		return a.outputJSON(help)
+	}
+	
+	fmt.Println("Sherlock Non-Interactive Mode")
+	fmt.Println("Usage: sherlock -e <command> [-o json]")
+	fmt.Println()
+	fmt.Println("Commands:")
+	for cmd, desc := range help["commands"].(map[string]string) {
+		fmt.Printf("  %-20s %s\n", cmd, desc)
+	}
+	return nil
+}
+
+// outputJSON outputs data as JSON.
+func (a *App) outputJSON(data interface{}) error {
+	output, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(output))
+	return nil
+}
+
+// errorToString converts error to string, returns empty string for nil.
+func errorToString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (a *App) run() error {
@@ -1646,6 +1922,15 @@ func printHelp() {
 
 Usage: sherlock [options] [command]
 
+Interactive Mode:
+  sherlock                           Start interactive mode with default config
+  sherlock --provider ollama         Use Ollama as LLM provider
+
+Non-Interactive Mode:
+  sherlock -e <command>              Execute command and exit
+  sherlock -e <command> -o json      Execute and output JSON
+  sherlock -n -e "hl"                List hosts in non-interactive mode
+
 Commands:
   host                    Show all saved hosts
 
@@ -1657,12 +1942,31 @@ Options:
   --model <model>         Model name
   --base-url <url>        Base URL for LLM API
   --api-key <key>         API key for LLM provider
+  
+Non-Interactive Options:
+  -e, --exec <cmd>        Execute command in non-interactive mode
+  -o, --output <format>   Output format: text (default), json
+  -n, --non-interactive   Run in non-interactive mode
+
+Non-Interactive Commands:
+  hl, host                List all SSH hosts
+  dl, db                  List all database connections
+  cl, cache               List all cache connections
+  tunnel list             List active tunnels
+  playbook list           List available playbooks
+  snippet list            List saved snippets
+  batch <cmd> --all       Execute command on all hosts
+  health [host]           Run health check
+  analyze <cmd>           Execute and analyze output
+  diagnose <error>        Diagnose error message
+  advisor <query>         Get AI operational advice
 
 Examples:
-  sherlock                           Start interactive mode with default config
-  sherlock host                      Show all saved hosts
-  sherlock --provider ollama         Use Ollama as LLM provider
-  sherlock -c ~/.config/sherlock/config.json
+  sherlock -e "hl"                       List hosts
+  sherlock -e "hl" -o json               List hosts as JSON
+  sherlock -e "batch uptime --all"       Run uptime on all hosts
+  sherlock -e "analyze df -h"            Analyze disk usage
+  sherlock -e "health"                   Health check all hosts
 
 For more information, visit: https://github.com/warm3snow/Sherlock
 `, appName, description)
